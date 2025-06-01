@@ -1,0 +1,321 @@
+# Contributing to Fractal Analyzer
+
+Thank you for your interest in contributing to Fractal Analyzer! This document provides guidelines and information for contributors.
+
+## Getting Started
+
+### Development Setup
+
+1. **Fork and clone the repository**
+   ```bash
+   git clone https://github.com/yourusername/Fractal_Analyzer.git
+   cd Fractal_Analyzer
+   ```
+
+2. **Create a virtual environment**
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
+
+3. **Install in development mode**
+   ```bash
+   pip install -e ".[dev]"
+   ```
+
+4. **Verify installation**
+   ```bash
+   pytest tests/
+   fractal-analyze --help
+   ```
+
+## Development Workflow
+
+### Branch Strategy
+- `main`: Stable releases
+- `develop`: Integration branch for features
+- `feature/your-feature`: Feature development
+- `bugfix/issue-description`: Bug fixes
+
+### Making Changes
+
+1. **Create a feature branch**
+   ```bash
+   git checkout -b feature/your-feature-name
+   ```
+
+2. **Make your changes**
+   - Write clear, documented code
+   - Follow existing code style
+   - Add tests for new functionality
+
+3. **Test your changes**
+   ```bash
+   # Run all tests
+   pytest tests/
+   
+   # Run specific test file
+   pytest tests/test_fractal_analyzer.py
+   
+   # Run with coverage
+   pytest --cov=fractal_analyzer tests/
+   ```
+
+4. **Format your code**
+   ```bash
+   # Format with black
+   black fractal_analyzer/ tests/
+   
+   # Sort imports
+   isort fractal_analyzer/ tests/
+   
+   # Check with flake8
+   flake8 fractal_analyzer/ tests/
+   ```
+
+5. **Commit and push**
+   ```bash
+   git add .
+   git commit -m "feat: add your feature description"
+   git push origin feature/your-feature-name
+   ```
+
+6. **Create a Pull Request**
+
+## Code Style Guidelines
+
+### Python Code Style
+- **Formatting**: Use [Black](https://black.readthedocs.io/) with line length 88
+- **Import sorting**: Use [isort](https://pycqa.github.io/isort/) with Black profile
+- **Linting**: Follow [flake8](https://flake8.pycqa.org/) guidelines
+- **Type hints**: Include type annotations for public APIs
+
+### Documentation Style
+- **Docstrings**: Use NumPy-style docstrings
+- **Comments**: Clear, concise explanations for complex logic
+- **README updates**: Update documentation for new features
+
+### Example Code Style
+```python
+import numpy as np
+from typing import Tuple, List, Optional
+
+class ExampleAnalyzer:
+    """Example class following project conventions.
+    
+    Parameters
+    ----------
+    param : str
+        Description of parameter.
+    
+    Attributes
+    ----------
+    value : float
+        Description of attribute.
+    """
+    
+    def __init__(self, param: str) -> None:
+        self.param = param
+        self.value = 0.0
+    
+    def process_data(self, data: np.ndarray) -> Tuple[float, List[float]]:
+        """Process input data and return results.
+        
+        Parameters
+        ----------
+        data : np.ndarray
+            Input data array.
+            
+        Returns
+        -------
+        result : float
+            Primary result value.
+        details : List[float]
+            Additional result details.
+            
+        Raises
+        ------
+        ValueError
+            If data is empty or invalid.
+        """
+        if len(data) == 0:
+            raise ValueError("Data array cannot be empty")
+            
+        # Process the data
+        result = np.mean(data)
+        details = [np.min(data), np.max(data)]
+        
+        return result, details
+```
+
+## Testing Guidelines
+
+### Test Structure
+```
+tests/
+├── __init__.py
+├── test_fractal_analyzer.py      # Core fractal analysis tests
+├── test_rt_analyzer.py           # RT simulation tests
+├── test_integration.py           # Integration tests
+└── test_data/                    # Test data files
+    ├── small_koch.txt
+    └── sample_rt.vtk
+```
+
+### Writing Tests
+- **Unit tests**: Test individual functions/methods
+- **Integration tests**: Test component interactions
+- **Regression tests**: Prevent known bugs from reoccurring
+- **Performance tests**: Monitor computational efficiency
+
+### Test Example
+```python
+import pytest
+import numpy as np
+from fractal_analyzer import FractalAnalyzer
+
+class TestFractalAnalyzer:
+    """Test suite for FractalAnalyzer class."""
+    
+    def test_koch_generation(self):
+        """Test Koch curve generation."""
+        analyzer = FractalAnalyzer('koch')
+        points, segments = analyzer.generate_fractal('koch', level=3)
+        
+        # Verify output structure
+        assert len(segments) > 0
+        assert all(len(seg) == 2 for seg in segments)
+        assert all(len(point) == 2 for point in seg for seg in segments)
+    
+    def test_dimension_calculation_accuracy(self):
+        """Test fractal dimension calculation accuracy."""
+        analyzer = FractalAnalyzer('koch')
+        points, segments = analyzer.generate_fractal('koch', level=4)
+        
+        results = analyzer.analyze_linear_region(segments, plot_results=False)
+        dimension = results[5]  # optimal_dimension
+        
+        # Should be close to theoretical value
+        theoretical = np.log(4) / np.log(3)
+        assert abs(dimension - theoretical) < 0.05
+    
+    @pytest.mark.slow
+    def test_large_dataset_performance(self):
+        """Test performance with large datasets."""
+        # Performance test for large curves
+        pass
+```
+
+## Types of Contributions
+
+### Bug Reports
+When reporting bugs, please include:
+- Python version and operating system
+- Package version (`python -c "import fractal_analyzer; print(fractal_analyzer.__version__)"`)
+- Minimal example that reproduces the issue
+- Expected vs. actual behavior
+- Error messages and stack traces
+
+### Feature Requests
+For new features, please:
+- Check existing issues to avoid duplicates
+- Describe the use case and motivation
+- Provide example API design if applicable
+- Consider implementation complexity
+
+### Documentation Improvements
+- Fix typos, grammar, or unclear explanations
+- Add examples for existing functionality
+- Improve API documentation
+- Create tutorials for common workflows
+
+### Code Contributions
+
+#### Priority Areas
+1. **Performance optimizations**
+   - Box-counting algorithm improvements
+   - Spatial indexing enhancements
+   - Parallel processing support
+
+2. **New analysis methods**
+   - Alternative fractal dimension algorithms
+   - Additional mixing thickness methods
+   - Multifractal analysis extensions
+
+3. **File format support**
+   - Additional VTK variants
+   - HDF5 simulation output
+   - Standard fractal data formats
+
+4. **Visualization improvements**
+   - Interactive plotting options
+   - Animation capabilities
+   - Better publication-quality output
+
+#### Code Review Process
+1. All contributions require review
+2. Automatic checks must pass (tests, linting)
+3. Documentation must be updated
+4. Breaking changes need discussion
+
+## Scientific Accuracy
+
+### Validation Requirements
+- **Mathematical correctness**: Verify algorithms against known results
+- **Literature comparison**: Compare with published methods
+- **Test cases**: Include validation against theoretical values
+- **Numerical stability**: Test edge cases and extreme parameters
+
+### Reference Implementation
+When implementing published algorithms:
+- Cite original papers in docstrings
+- Include parameter ranges from literature
+- Validate against published test cases
+- Document any modifications or assumptions
+
+## Community Guidelines
+
+### Code of Conduct
+- Be respectful and inclusive
+- Welcome newcomers and different perspectives
+- Focus on constructive feedback
+- Help others learn and contribute
+
+### Communication
+- **Issues**: Technical problems and feature requests
+- **Discussions**: General questions and ideas
+- **Pull Requests**: Code review and technical discussion
+- **Email**: Sensitive issues (maintainer email)
+
+## Release Process
+
+### Version Numbering
+We follow [Semantic Versioning](https://semver.org/):
+- `MAJOR.MINOR.PATCH`
+- Major: Breaking API changes
+- Minor: New features, backwards compatible
+- Patch: Bug fixes, backwards compatible
+
+### Changelog
+Update `CHANGELOG.md` with:
+- New features
+- Bug fixes
+- Breaking changes
+- Deprecations
+
+## Recognition
+
+Contributors are recognized in:
+- `AUTHORS.md` file
+- Release notes
+- Documentation acknowledgments
+- Git history preservation
+
+## Questions?
+
+- **Technical questions**: GitHub Discussions
+- **Bug reports**: GitHub Issues
+- **Security issues**: Email maintainers directly
+- **General inquiries**: GitHub Discussions
+
+Thank you for contributing to Fractal Analyzer!
