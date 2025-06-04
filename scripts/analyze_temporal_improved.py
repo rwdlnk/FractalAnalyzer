@@ -5,7 +5,7 @@ import argparse
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from rt_analyzer import RTAnalyzer
+from fractal_analyzer import RTAnalyzer
 
 def find_vtk_files_with_times(base_pattern, target_times=None):
     """
@@ -66,7 +66,7 @@ def find_vtk_files_with_times(base_pattern, target_times=None):
         return sorted(closest_matches, key=lambda x: x[0])
 
 def analyze_temporal_evolution(output_dir, resolutions, base_pattern=None, specific_times=None, 
-                              time_tolerance=0.5, auto_detect_times=False):
+                              time_tolerance=0.5, auto_detect_times=False, mixing_method='dalziel',h0=0.5):
     """Analyze fractal dimension evolution over time for different resolutions."""
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
@@ -143,10 +143,10 @@ def analyze_temporal_evolution(output_dir, resolutions, base_pattern=None, speci
                 data = analyzer.read_vtk_file(vtk_file)
                 
                 # Find initial interface position
-                h0 = analyzer.find_initial_interface(data)
+                # h0 is now passed as parameter - no need to detect it
                 
                 # Calculate mixing thickness
-                mixing = analyzer.compute_mixing_thickness(data, h0)
+                mixing = analyzer.compute_mixing_thickness(data, h0, method=mixing_method)
                 
                 # Calculate fractal dimension
                 fd_results = analyzer.compute_fractal_dimension(data)
@@ -382,7 +382,8 @@ def plot_multi_resolution_evolution(all_results, resolutions, output_dir):
     plt.savefig(os.path.join(multi_res_dir, 'phase_portrait.png'), dpi=300)
     plt.close()
 
-if __name__ == "__main__":
+def main():
+    """Main function for console script entry point."""
     parser = argparse.ArgumentParser(description='Analyze fractal dimension temporal evolution with improved file finding')
     parser.add_argument('--resolutions', '-r', type=int, nargs='+', required=True,
                       help='Resolutions to analyze (e.g., 100 200 400 800)')
@@ -396,7 +397,11 @@ if __name__ == "__main__":
                       help='Auto-detect reasonable time range for analysis')
     parser.add_argument('--time-tolerance', type=float, default=0.5,
                       help='Maximum time difference for matching files (default: 0.5)')
-    
+    parser.add_argument('--mixing-method', default='dalziel', 
+                  choices=['geometric', 'statistical', 'dalziel'],
+                  help='Method for computing mixing layer thickness (default: dalziel)')
+    parser.add_argument('--h0', type=float, default=0.5,
+                      help='Initial interface position in physical coordinates (default: 0.5)')
     args = parser.parse_args()
     
     # Run analysis
@@ -406,7 +411,9 @@ if __name__ == "__main__":
         args.pattern, 
         args.times,
         args.time_tolerance,
-        args.auto_times
+        args.auto_times,
+        args.mixing_method,
+        args.h0
     )
     
     if results:
@@ -424,3 +431,6 @@ if __name__ == "__main__":
             print(f"  {resolution}x{resolution}: {len(df)} points, t={time_range}, avg D={avg_dim:.3f}")
     else:
         print("Analysis failed - check file paths and parameters")
+
+if __name__ == "__main__":
+    main()

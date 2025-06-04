@@ -6,11 +6,12 @@ Uses working basic fractal analysis (not multifractal)
 
 import os
 import glob
+import argparse
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
-from rt_analyzer import RTAnalyzer
+from fractal_analyzer import RTAnalyzer
 
 def find_closest_time_file(base_dir, resolution, target_time):
     """Find VTK file closest to target time for given resolution."""
@@ -43,7 +44,7 @@ def richardson_extrapolation(h, f_inf, C, p):
     """Richardson extrapolation model: f(h) = f_inf + C*h^p"""
     return f_inf + C * h**p
 
-def analyze_resolution_convergence(base_dir, target_time=5.0, output_dir="./resolution_convergence"):
+def analyze_resolution_convergence(base_dir, target_time=5.0, output_dir="./resolution_convergence", mixing_method='dalziel', h0=0.5):
     """Analyze fractal dimension convergence across resolutions."""
     
     # Create output directory
@@ -77,7 +78,7 @@ def analyze_resolution_convergence(base_dir, target_time=5.0, output_dir="./reso
         # Analyze this file
         try:
             analyzer = RTAnalyzer(os.path.join(output_dir, f"res_{resolution}"))
-            result = analyzer.analyze_vtk_file(vtk_file)
+            result = analyzer.analyze_vtk_file(vtk_file, mixing_method=mixing_method,h0=h0)
             
             results.append({
                 'resolution': resolution,
@@ -275,9 +276,8 @@ def perform_richardson_extrapolation(df, target_time, output_dir):
         print(f"Error in Richardson extrapolation: {str(e)}")
         return None, None
 
-if __name__ == "__main__":
-    import argparse
-    
+def main():
+    """Main function for console script entry point."""
     parser = argparse.ArgumentParser(description='Resolution convergence analysis for RT fractal dimension')
     parser.add_argument('--base-dir', '-d', default='..', 
                        help='Base directory containing resolution subdirectories')
@@ -285,14 +285,21 @@ if __name__ == "__main__":
                        help='Target time for analysis (default: 5.0)')
     parser.add_argument('--output', '-o', default='./resolution_convergence',
                        help='Output directory')
-    
+    parser.add_argument('--mixing-method', default='dalziel',
+                      choices=['geometric', 'statistical', 'dalziel'],
+                      help='Method for computing mixing layer thickness (default: dalziel)')
+    parser.add_argument('--h0', type=float, default=0.5,
+                      help='Initial interface position in physical coordinates (default: 0.5)')
     args = parser.parse_args()
     
     # Run the analysis
-    results = analyze_resolution_convergence(args.base_dir, args.time, args.output)
+    results = analyze_resolution_convergence(args.base_dir, args.time, args.output, args.mixing_method, args.h0)
     
     if results is not None:
         print(f"\nResolution convergence analysis complete!")
         print(f"Results saved to: {args.output}")
     else:
         print("Analysis failed - check file paths and data availability")
+
+if __name__ == "__main__":
+    main()
