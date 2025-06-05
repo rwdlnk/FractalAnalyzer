@@ -84,12 +84,17 @@ def analyze_temporal_evolution(output_dir, resolutions, base_pattern=None, speci
         
         # Create pattern for this resolution
         if base_pattern:
-            pattern = base_pattern.format(resolution=resolution)
+           pattern = base_pattern.format(resolution=resolution)
         else:
-            pattern = f"../{resolution}x{resolution}/RT{resolution}x{resolution}-*.vtk"
-        
+            pattern = f"./{resolution}x{resolution}/RT{resolution}x{resolution}-*.vtk"  # Changed ../ to ./
         print(f"Using pattern: {pattern}")
-        
+
+        # Check if resolution directory exists
+        resolution_dir = f"./{resolution}x{resolution}"
+        if not os.path.exists(resolution_dir):
+            print(f"Warning: Directory {resolution_dir} does not exist. Skipping {resolution}x{resolution}")
+            continue
+
         # Find VTK files and their times
         if specific_times:
             # Find closest matches to specific times
@@ -137,37 +142,35 @@ def analyze_temporal_evolution(output_dir, resolutions, base_pattern=None, speci
         # Process each file
         for i, (actual_time, vtk_file) in enumerate(file_time_pairs):
             print(f"Processing file {i+1}/{len(file_time_pairs)}: {os.path.basename(vtk_file)} (t={actual_time:.3f})")
-            
+
             try:
-                # Read the VTK file
-                data = analyzer.read_vtk_file(vtk_file)
-                
-                # Find initial interface position
-                # h0 is now passed as parameter - no need to detect it
-                
-                # Calculate mixing thickness
-                mixing = analyzer.compute_mixing_thickness(data, h0, method=mixing_method)
-                
-                # Calculate fractal dimension
-                fd_results = analyzer.compute_fractal_dimension(data)
-                
-                # Store results
+                # Use the complete analysis method instead of separate calls
+                result = analyzer.analyze_vtk_file(vtk_file, mixing_method=mixing_method, h0=h0)
+    
+                # Store results directly from the complete analysis
                 results.append({
                     'time': actual_time,
                     'h0': h0,
-                    'ht': mixing['ht'],
-                    'hb': mixing['hb'],
-                    'h_total': mixing['h_total'],
-                    'fractal_dim': fd_results['dimension'],
-                    'fd_error': fd_results['error'],
-                    'fd_r_squared': fd_results['r_squared'],
+                    'ht': result['ht'],
+                    'hb': result['hb'],
+                    'h_total': result['h_total'],
+                    'fractal_dim': result['fractal_dim'],
+                    'fd_error': result['fd_error'],
+                    'fd_r_squared': result['fd_r_squared'],
                     'resolution': resolution,
                     'vtk_file': vtk_file
                 })
-                
-                print(f"  Time: {actual_time:.3f}, Dimension: {fd_results['dimension']:.4f}, "
-                      f"Mixing: {mixing['h_total']:.4f}, R²: {fd_results['r_squared']:.4f}")
-                
+    
+                print(f"  Time: {actual_time:.3f}, Dimension: {result['fractal_dim']:.4f}, "
+                      f"Mixing: {result['h_total']:.4f}, R²: {result['fd_r_squared']:.4f}")
+    
+                # Validate results
+                if not (1.0 <= result['fractal_dim'] <= 2.0):
+                    print(f"  Warning: Fractal dimension {result['fractal_dim']:.3f} outside physical range [1.0, 2.0]")
+    
+                if result['h_total'] <= 0:
+                    print(f"  Warning: Non-positive mixing thickness {result['h_total']:.6f}")
+
             except Exception as e:
                 print(f"Error processing {vtk_file}: {str(e)}")
                 import traceback

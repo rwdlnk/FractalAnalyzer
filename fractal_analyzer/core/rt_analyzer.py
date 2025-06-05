@@ -161,71 +161,99 @@ class RTAnalyzer:
         if method == 'geometric':
             # Extract interface contours
             contours = self.extract_interface(data['f'], data['x'], data['y'])
-            
+        
             # Find maximum displacement above and below initial interface
             ht = 0.0
             hb = 0.0
-            
+        
             for contour in contours:
                 y_coords = contour[:, 1]
-                ht = max(ht, np.max(y_coords - h0))
-                hb = max(hb, np.max(h0 - y_coords))
+                # Calculate displacements from initial interface
+                y_displacements = y_coords - h0
             
+                # Upper mixing thickness (positive displacements)
+                if np.any(y_displacements > 0):
+                    ht = max(ht, np.max(y_displacements[y_displacements > 0]))
+            
+                # Lower mixing thickness (negative displacements, made positive)
+                if np.any(y_displacements < 0):
+                    hb = max(hb, np.max(-y_displacements[y_displacements < 0]))
+        
             return {'ht': ht, 'hb': hb, 'h_total': ht + hb, 'method': 'geometric'}
-            
+        
         elif method == 'statistical':
             # Use concentration thresholds to define mixing zone
-            f_avg = np.mean(data['f'], axis=0)
-            y_values = data['y'][0, :]
-            
+            # NEED TO VERIFY CORRECT AVERAGING AXIS BASED ON DATA STRUCTURE
+            # Debug: print data shapes to determine correct axis
+            print(f"DEBUG: data['f'] shape: {data['f'].shape}")
+            print(f"DEBUG: data['y'] shape: {data['y'].shape}")
+        
+            # Horizontal average - VERIFY THIS IS CORRECT AXIS
+            f_avg = np.mean(data['f'], axis=0)  # May need to be axis=1
+            y_values = data['y'][0, :]  # May need to be data['y'][:, 0]
+        
             epsilon = 0.01  # Threshold for "pure" fluid
-            
+        
             # Find uppermost position where f drops below 1-epsilon
             upper_idx = np.where(f_avg < 1 - epsilon)[0]
             if len(upper_idx) > 0:
                 y_upper = y_values[upper_idx[0]]
             else:
                 y_upper = y_values[-1]
-            
+        
             # Find lowermost position where f rises above epsilon
             lower_idx = np.where(f_avg > epsilon)[0]
             if len(lower_idx) > 0:
                 y_lower = y_values[lower_idx[-1]]
             else:
                 y_lower = y_values[0]
-            
+        
             # Calculate thicknesses
             ht = max(0, y_upper - h0)
             hb = max(0, h0 - y_lower)
-            
-            return {'ht': ht, 'hb': hb, 'h_total': ht + hb, 'method': 'statistical'}
         
+            return {'ht': ht, 'hb': hb, 'h_total': ht + hb, 'method': 'statistical'}
+
         elif method == 'dalziel':
             # Dalziel-style concentration-based mixing thickness
             # Following Dalziel et al. (1999) methodology
-            f_avg = np.mean(data['f'], axis=0)  # Horizontal average
-            y_values = data['y'][0, :]
-            
+    
+            # Horizontal average
+            f_avg = np.mean(data['f'], axis=0)  # Average over x (first axis)
+            y_values = data['y'][0, :]  # y-coordinates along first row
+    
             # Use concentration thresholds following Dalziel et al.
-            # They mention using thresholds to define mixing zone boundaries
-            lower_threshold = 0.05  # 5% threshold (heavy fluid in light region)
-            upper_threshold = 0.95  # 95% threshold (light fluid in heavy region)
-            
-            # Find mixing zone boundaries
-            # Upper boundary: first point where concentration drops to upper_threshold
-            upper_idx = np.where(f_avg <= upper_threshold)[0]
-            # Lower boundary: last point where concentration rises to lower_threshold  
-            lower_idx = np.where(f_avg >= lower_threshold)[0]
-            
-            if len(upper_idx) > 0 and len(lower_idx) > 0:
-                y_upper = y_values[upper_idx[0]]   # First point below 95%
-                y_lower = y_values[lower_idx[-1]]  # Last point above 5%
-                
-                # Calculate mixing layer thicknesses relative to initial interface
-                ht = max(0, y_upper - h0)  # Upper mixing thickness
-                hb = max(0, h0 - y_lower)  # Lower mixing thickness
-                h_total = y_upper - y_lower  # Total mixing zone width
-                
+            lower_threshold = 0.05  # 5% threshold 
+            upper_threshold = 0.95  # 95% threshold 
+    
+            # CORRECTED LOGIC: Look for mixing zone boundaries around h0
+            # In RT: heavy fluid (f≈1) at top, light fluid (f≈0) at bottom
+            # Mixing zone: where 0.05 < f < 0.95
+    
+            # Find indices where we have mixed fluid (between thresholds)
+            mixed_indices = np.where((f_avg > lower_threshold) & (f_avg < upper_threshold))[0]
+    
+            if len(mixed_indices) > 0:
+                # Find the extent of the mixing zone
+                mixed_y_min = y_values[mixed_indices[0]]   # Lowest y with mixed fluid
+                mixed_y_max = y_values[mixed_indices[-1]]  # Highest y with mixed fluid
+        
+                print(f"DEBUG: Mixing zone extends from y={mixed_y_min:.6f} to y={mixed_y_max:.6f}")
+                print(f"DEBUG: h0={h0:.6f}")
+        
+                # Calculate thicknesses relative to initial interface
+                # Upper thickness: how far mixing extends above h0
+                ht = max(0, mixed_y_max - h0)
+        
+                # Lower thickness: how far mixing extends below h0  
+                hb = max(0, h0 - mixed_y_min)
+        
+                print(f"DEBUG: ht = max(0, {mixed_y_max:.6f} - {h0:.6f}) = {ht:.6f}")
+                print(f"DEBUG: hb = max(0, {h0:.6f} - {mixed_y_min:.6f}) = {hb:.6f}")
+        
+                # Total mixing thickness
+                h_total = ht + hb
+        
                 # Additional Dalziel-style diagnostics
                 # Mixing zone center of mass
                 mixing_region = (f_avg >= lower_threshold) & (f_avg <= upper_threshold)
@@ -233,15 +261,16 @@ class RTAnalyzer:
                     y_center = np.average(y_values[mixing_region], weights=f_avg[mixing_region])
                 else:
                     y_center = h0
-                
+        
                 # Mixing efficiency (fraction of domain that is mixed)
                 mixing_fraction = np.sum(mixing_region) / len(f_avg)
-                
+        
             else:
                 # No clear mixing zone found
+                print("DEBUG: No mixing zone found (no points between 5% and 95%)")
                 ht = hb = h_total = y_center = 0
                 mixing_fraction = 0
-            
+    
             return {
                 'ht': ht, 
                 'hb': hb, 
@@ -252,9 +281,6 @@ class RTAnalyzer:
                 'upper_threshold': upper_threshold,
                 'method': 'dalziel'
             }
-        
-        else:
-            raise ValueError(f"Unknown mixing thickness method: {method}")
 
     def compute_fractal_dimension(self, data, min_box_size=0.001):
         """Compute fractal dimension of the interface using basic box counting."""

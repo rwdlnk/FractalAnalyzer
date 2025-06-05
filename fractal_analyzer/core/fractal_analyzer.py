@@ -702,11 +702,50 @@ class FractalAnalyzer:
             print(f"R-squared value: {r_value**2:.4f}")
         
             return fractal_dimension, std_err, intercept
+
+    def estimate_min_box_size_from_segments(self, segments, percentile=10, multiplier=3):
+        """
+        Estimate appropriate min_box_size from segment lengths.
     
+        Args:
+            segments: List of line segments ((x1,y1), (x2,y2))
+            percentile: Percentile of segment lengths to use (default: 10th percentile)
+            multiplier: Factor to multiply characteristic length (default: 3)
+    
+        Returns:
+            float: Suggested minimum box size
+        """
+        if not segments:
+            print("Warning: No segments provided for box size estimation")
+            return 0.001  # Fallback value
+    
+        # Calculate all segment lengths
+        lengths = []
+        for (x1, y1), (x2, y2) in segments:
+            length = np.sqrt((x2-x1)**2 + (y2-y1)**2)
+            lengths.append(length)
+    
+        lengths = np.array(lengths)
+    
+        # Use specified percentile (short segments) as reference
+        characteristic_length = np.percentile(lengths, percentile)
+    
+        # Min box size should be several times the characteristic segment length
+        min_box_size = multiplier * characteristic_length
+    
+        print(f"Segment length analysis:")
+        print(f"  Total segments: {len(segments)}")
+        print(f"  Mean length: {np.mean(lengths):.6f}")
+        print(f"  Median length: {np.median(lengths):.6f}")
+        print(f"  {percentile}th percentile: {characteristic_length:.6f}")
+        print(f"  Suggested min_box_size: {min_box_size:.6f} ({multiplier}× {percentile}th percentile)")
+    
+        return min_box_size    
+
 # ================ Advanced Analysis Functions ================
     def analyze_linear_region(self, segments, fractal_type=None, plot_results=True, 
-            plot_boxes=True, trim_boundary=0, box_size_factor=1.5, use_grid_optimization=True,
-	        return_box_data=False, plot_separate=False):    
+        plot_boxes=True, trim_boundary=0, box_size_factor=1.5, use_grid_optimization=True,
+        return_box_data=False, plot_separate=False, min_box_size=None):  # Add this parameter
         """
         Analyze how the choice of linear region affects the calculated dimension.
         Uses a sliding window approach to identify the optimal scaling region.
@@ -729,12 +768,16 @@ class FractalAnalyzer:
         min_y = min(min(s[0][1], s[1][1]) for s in segments)
         max_y = max(max(s[0][1], s[1][1]) for s in segments)
         extent = max(max_x - min_x, max_y - min_y)
-        
-        # Use same box sizes as original fd-all.py
-        min_box_size = 0.001
-        max_box_size = None
-        if max_box_size is None:
-            max_box_size = extent / 2
+
+        # UPDATED: Auto-estimate min_box_size if not provided
+        if min_box_size is None:
+            min_box_size = self.estimate_min_box_size_from_segments(segments)
+            print(f"Auto-estimated min_box_size: {min_box_size:.6f}")
+        else:
+            print(f"Using provided min_box_size: {min_box_size:.6f}")
+
+        # Determine max_box_size
+        max_box_size = extent / 2
         box_size_factor = box_size_factor 
         
         print(f"Using box size range: {min_box_size:.8f} to {max_box_size:.8f}")
@@ -819,18 +862,52 @@ class FractalAnalyzer:
             end_indices.append(best_end)
             
             print(f"{window_size:11d} | {best_start:9d} | {best_end:7d} | {best_dimension:9.6f} | {best_error:5.6f} | {best_r2:.6f}")
-        
-        # Find the window with dimension closest to theoretical or best R²
+
+        # Enhancement for fractal_analyzer.py analyze_linear_region method
+        # Find the window with dimension closest to theoretical or best R² WITH PHYSICAL CONSTRAINTS
         if theoretical_dimension is not None:
             closest_idx = np.argmin(np.abs(np.array(dimensions) - theoretical_dimension))
         else:
-            closest_idx = np.argmax(r_squared)
+            # For RT interfaces, apply physical constraints:
+            # 1. Dimension should be between 1.0 and 2.0 (for 2D interfaces)
+            # 2. Window size should be at least 4 points for reliable regression
+            # 3. Prefer larger windows when R² is similar
+    
+            valid_indices = []
+            for i, (window, dim, r2) in enumerate(zip(windows, dimensions, r_squared)):
+                # Physical constraint: 1.0 ≤ D ≤ 2.0
+                if 1.0 <= dim <= 2.0:
+                    # Statistical constraint: window size ≥ 4 
+                    if window >= 4:
+                        # Quality constraint: R² ≥ 0.99
+                        if r2 >= 0.99:
+                            valid_indices.append(i)
+    
+            if valid_indices:
+                # Among valid windows, prefer larger windows when R² is close
+                # Sort by R² (descending), then by window size (descending) as tiebreaker
+                valid_data = [(r_squared[i], windows[i], i) for i in valid_indices]
+                valid_data.sort(key=lambda x: (x[0], x[1]), reverse=True)
+       
+                # Select the best valid window
+                closest_idx = valid_data[0][2]
         
+                print(f"Applied physical constraints:")
+                print(f"  Valid windows: {[windows[i] for i in valid_indices]}")
+                print(f"  Valid dimensions: {[f'{dimensions[i]:.3f}' for i in valid_indices]}")
+                print(f"  Valid R²: {[f'{r_squared[i]:.6f}' for i in valid_indices]}")
+                print(f"  Selected window {windows[closest_idx]} (D={dimensions[closest_idx]:.6f})")
+            else:
+                # Fallback: use best R² without constraints (but warn)
+                closest_idx = np.argmax(r_squared)
+                print(f"WARNING: No windows met physical constraints. Using best R² = {r_squared[closest_idx]:.6f}")
+                print(f"WARNING: Dimension {dimensions[closest_idx]:.6f} may be unphysical")
+
         optimal_window = windows[closest_idx]
         optimal_dimension = dimensions[closest_idx]
         optimal_start = start_indices[closest_idx]
         optimal_end = end_indices[closest_idx]
-        
+
         print("\nResults:")
         print("\nDetailed window analysis:")
         print("Window | Dimension | Theoretical Error | R² | Error Magnitude")
