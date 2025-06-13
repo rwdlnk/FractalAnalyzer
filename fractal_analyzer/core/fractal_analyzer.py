@@ -703,55 +703,169 @@ class FractalAnalyzer:
         
             return fractal_dimension, std_err, intercept
 
-    def estimate_min_box_size_from_segments(self, segments, percentile=10, multiplier=3):
+    def estimate_min_box_size_from_segments(self, segments, percentile=5, multiplier=1.5, 
+                                           min_box_sizes=12, target_decades=2.0):
         """
-        Estimate appropriate min_box_size from segment lengths.
-    
+        Estimate appropriate min_box_size from segment lengths with scaling range validation.
+
         Args:
             segments: List of line segments ((x1,y1), (x2,y2))
-            percentile: Percentile of segment lengths to use (default: 10th percentile)
-            multiplier: Factor to multiply characteristic length (default: 3)
-    
+            percentile: Percentile of segment lengths to use (default: 5th percentile)
+            multiplier: Factor to multiply characteristic length (default: 1.5)
+            min_box_sizes: Minimum number of box sizes required (default: 12)
+            target_decades: Target decades of scaling range (default: 2.0)
+
         Returns:
             float: Suggested minimum box size
         """
         if not segments:
             print("Warning: No segments provided for box size estimation")
             return 0.001  # Fallback value
-    
+
         # Calculate all segment lengths
         lengths = []
         for (x1, y1), (x2, y2) in segments:
             length = np.sqrt((x2-x1)**2 + (y2-y1)**2)
-            lengths.append(length)
-    
+            if length > 0:  # Only include non-zero lengths
+                lengths.append(length)
+
+        if not lengths:
+            print("Warning: No segments with non-zero length found")
+            return 0.001
+
         lengths = np.array(lengths)
-    
-        # Use specified percentile (short segments) as reference
+
+        # Calculate extent for max_box_size estimation
+        min_x = min(min(s[0][0], s[1][0]) for s in segments)
+        max_x = max(max(s[0][0], s[1][0]) for s in segments)
+        min_y = min(min(s[0][1], s[1][1]) for s in segments)
+        max_y = max(max(s[0][1], s[1][1]) for s in segments)
+        extent = max(max_x - min_x, max_y - min_y)
+        max_box_size = extent / 2
+
+        # Use specified percentile as reference
         characteristic_length = np.percentile(lengths, percentile)
     
-        # Min box size should be several times the characteristic segment length
+        # Initial estimate
         min_box_size = multiplier * characteristic_length
-    
+
+        # Check scaling range and adjust if needed
+        box_size_factor = 1.5  # Standard reduction factor
+        expected_steps = int(np.log(max_box_size/min_box_size) / np.log(box_size_factor))
+        decades_of_scaling = np.log10(max_box_size/min_box_size)
+
         print(f"Segment length analysis:")
         print(f"  Total segments: {len(segments)}")
         print(f"  Mean length: {np.mean(lengths):.6f}")
         print(f"  Median length: {np.median(lengths):.6f}")
+        print(f"  Min length: {np.min(lengths):.6f}")
         print(f"  {percentile}th percentile: {characteristic_length:.6f}")
-        print(f"  Suggested min_box_size: {min_box_size:.6f} ({multiplier}× {percentile}th percentile)")
-    
-        return min_box_size    
+        print(f"  Initial min_box_size: {min_box_size:.6f} ({multiplier}× {percentile}th percentile)")
+        print(f"  Expected box sizes: {expected_steps}")
+        print(f"  Scaling range: {decades_of_scaling:.2f} decades")
+
+        # Adjust if insufficient scaling range
+        if expected_steps < min_box_sizes or decades_of_scaling < target_decades:
+            print(f"  → Insufficient scaling range detected")
+        
+            # Calculate what min_box_size we need for target requirements
+            target_from_steps = max_box_size / (box_size_factor ** min_box_sizes)
+            target_from_decades = max_box_size / (10 ** target_decades)
+        
+            # Use the smaller (more conservative) of the two targets
+            adjusted_min_box_size = min(target_from_steps, target_from_decades)
+        
+            # But don't go below the minimum segment length
+            min_segment_length = np.min(lengths)
+            final_min_box_size = max(adjusted_min_box_size, min_segment_length * 0.1)
+        
+            reduction_factor = final_min_box_size / min_box_size
+            print(f"  → Adjusting min_box_size by factor {reduction_factor:.3f}")
+            print(f"  → Final min_box_size: {final_min_box_size:.6f}")
+        
+            # Recalculate metrics
+            final_steps = int(np.log(max_box_size/final_min_box_size) / np.log(box_size_factor))
+            final_decades = np.log10(max_box_size/final_min_box_size)
+            print(f"  → Final box sizes: {final_steps}")
+            print(f"  → Final scaling range: {final_decades:.2f} decades")
+        
+            return final_min_box_size
+        else:
+            print(f"  → Scaling range is adequate")
+            return min_box_size
+
+    def validate_and_adjust_box_sizes(self, min_box_size, max_box_size, segments):
+        """
+        Validate and adjust box sizes to ensure min_box_size < max_box_size.
+        
+        Args:
+            min_box_size: Proposed minimum box size
+            max_box_size: Maximum box size (typically extent/2)
+            segments: List of line segments for fallback calculations
+            
+        Returns:
+            tuple: (adjusted_min_box_size, max_box_size, warning_message)
+        """
+        warning_msg = ""
+        
+        # Check if min_box_size >= max_box_size
+        if min_box_size >= max_box_size:
+            warning_msg = f"WARNING: Auto-estimated min_box_size ({min_box_size:.6f}) >= max_box_size ({max_box_size:.6f})"
+            print(warning_msg)
+            
+            # Strategy 1: Reduce min_box_size to a fraction of max_box_size
+            safety_factor = 0.01  # Use 1% of max_box_size as fallback
+            fallback_min = max_box_size * safety_factor
+            
+            # Strategy 2: Use the smallest segment length directly (no multiplier)
+            if segments:
+                lengths = []
+                for (x1, y1), (x2, y2) in segments:
+                    length = np.sqrt((x2-x1)**2 + (y2-y1)**2)
+                    lengths.append(length)
+                
+                lengths = np.array(lengths)
+                min_segment_length = np.min(lengths[lengths > 0])  # Avoid zero-length segments
+                
+                # Choose the smaller of the two fallback strategies
+                adjusted_min = min(fallback_min, min_segment_length)
+            else:
+                adjusted_min = fallback_min
+            
+            print(f"Adjusting min_box_size to {adjusted_min:.6f}")
+            print(f"This ensures min_box_size/max_box_size ratio = {adjusted_min/max_box_size:.4f}")
+            
+            # Ensure we have at least a few box size steps
+            ratio = adjusted_min / max_box_size
+            if ratio > 0.5:  # If still too large, be more aggressive
+                adjusted_min = max_box_size * 0.001  # 0.1% of max_box_size
+                print(f"Further reducing min_box_size to {adjusted_min:.6f} for sufficient scaling range")
+            
+            return adjusted_min, max_box_size, warning_msg
+        
+        # Sizes are valid - also check if we have sufficient scaling range
+        ratio = min_box_size / max_box_size
+        if ratio > 0.1:  # Less than 1 decade of scaling
+            warning_msg = f"WARNING: Limited scaling range - min/max ratio = {ratio:.4f}"
+            print(warning_msg)
+            print("Consider using a smaller min_box_size for better fractal dimension accuracy")
+        
+        return min_box_size, max_box_size, warning_msg
 
 # ================ Advanced Analysis Functions ================
     def analyze_linear_region(self, segments, fractal_type=None, plot_results=True, 
         plot_boxes=True, trim_boundary=0, box_size_factor=1.5, use_grid_optimization=True,
-        return_box_data=False, plot_separate=False, min_box_size=None):  # Add this parameter
+        return_box_data=False, plot_separate=False, min_box_size=None):
         """
         Analyze how the choice of linear region affects the calculated dimension.
         Uses a sliding window approach to identify the optimal scaling region.
         """
         print("\n==== ANALYZING LINEAR REGION SELECTION ====\n")
-        
+        #print(f"DEBUG: use_grid_optimization = {use_grid_optimization}")
+        #print(f"DEBUG: About to call box counting method...")
+        #print(f"DEBUG: Will use {'GRID OPTIMIZATION' if use_grid_optimization else 'BASIC METHOD'}")
+
+
         # Use provided type or instance type
         type_used = fractal_type or self.fractal_type
         
@@ -769,7 +883,8 @@ class FractalAnalyzer:
         max_y = max(max(s[0][1], s[1][1]) for s in segments)
         extent = max(max_x - min_x, max_y - min_y)
 
-        # UPDATED: Auto-estimate min_box_size if not provided
+        # Auto-estimate min_box_size if not provided
+        user_specified_min_box_size = min_box_size is not None
         if min_box_size is None:
             min_box_size = self.estimate_min_box_size_from_segments(segments)
             print(f"Auto-estimated min_box_size: {min_box_size:.6f}")
@@ -778,33 +893,47 @@ class FractalAnalyzer:
 
         # Determine max_box_size
         max_box_size = extent / 2
-        box_size_factor = box_size_factor 
-        
-        print(f"Using box size range: {min_box_size:.8f} to {max_box_size:.8f}")
+        warning = ""  # Initialize warning variable
+
+        # VALIDATION CHECK - Only validate auto-estimated values
+        if not user_specified_min_box_size:
+            min_box_size, max_box_size, warning = self.validate_and_adjust_box_sizes(
+                min_box_size, max_box_size, segments)
+            if warning:
+                print(f"Box size validation: {warning}")
+        else:
+            # Just check for basic sanity without overriding user input
+            if min_box_size >= max_box_size:
+                warning = f"WARNING: User-specified min_box_size ({min_box_size:.6f}) >= max_box_size ({max_box_size:.6f})"
+                print(warning)
+                print("This may result in very few box sizes. Consider using a smaller value.")
+
+        if warning:
+            print(f"Box size validation: {warning}")
+
+        print(f"Final box size range: {min_box_size:.8f} to {max_box_size:.8f}")
+        print(f"Scaling ratio (min/max): {min_box_size/max_box_size:.6f}")
         print(f"Box size reduction factor: {box_size_factor}")
-        
+
+        # Calculate expected number of box sizes
+        expected_steps = int(np.log(max_box_size/min_box_size) / np.log(box_size_factor))
+        print(f"Expected number of box sizes: {expected_steps}")
+
+        if expected_steps < 5:
+            print("WARNING: Very few box sizes will be tested. Consider adjusting parameters.")
+
         # Calculate fractal dimension with many data points
+        print(f"FINAL CHECK: use_grid_optimization = {use_grid_optimization}")
         if use_grid_optimization:
-            print("Using grid optimization method...")
+            print(">>>>> CALLING box_counting_with_grid_optimization <<<<<")
             box_sizes, box_counts, bounding_box = self.box_counting_with_grid_optimization(
                 segments, min_box_size, max_box_size, box_size_factor=box_size_factor)
         else:
-            print("Using basic method (no grid optimization)...")
+            print(">>>>> CALLING box_counting_optimized <<<<<")
             box_sizes, box_counts, bounding_box = self.box_counting_optimized(
                 segments, min_box_size, max_box_size, box_size_factor=box_size_factor)
+        print(f"Box counting method completed.")
 
-        #box_sizes, box_counts, bounding_box = self.box_counting_with_grid_optimization(
-        #    segments, min_box_size, max_box_size, box_size_factor=box_size_factor)
-
-        #box_sizes, box_counts, bounding_box = self.box_counting_optimized(
-        #    segments, min_box_size, max_box_size, box_size_factor=box_size_factor)
-        
-        # Trim boundary box counts if requested
-        #if trim_boundary > 0:
-        #    print(f"Trimming {trim_boundary} box counts from each end")
-        #    box_sizes, box_counts = self.trim_boundary_box_counts(box_sizes, box_counts, trim_boundary)
-        #    print(f"Box counts after trimming: {len(box_counts)}")
-        
         # Enhanced boundary handling (automatic + manual)
         box_sizes, box_counts = self.enhanced_boundary_removal(box_sizes, box_counts, trim_boundary)
         print(f"Box counts after enhanced boundary handling: {len(box_counts)}")        
@@ -854,14 +983,35 @@ class FractalAnalyzer:
                     best_start = start_idx
                     best_end = end_idx
             
-            # Store the best results for this window size
-            dimensions.append(best_dimension)
-            errors.append(best_error)
-            r_squared.append(best_r2)
-            start_indices.append(best_start)
-            end_indices.append(best_end)
+            # Only store results if we found a valid window
+            if best_dimension is not None:
+                dimensions.append(best_dimension)
+                errors.append(best_error)
+                r_squared.append(best_r2)
+                start_indices.append(best_start)
+                end_indices.append(best_end)
+                
+                print(f"{window_size:11d} | {best_start:9d} | {best_end:7d} | {best_dimension:9.6f} | {best_error:5.6f} | {best_r2:.6f}")
+            else:
+                print(f"{window_size:11d} | No valid regression possible")
+
+        # Check if we have any valid results
+        if not dimensions:
+            print("\nERROR: No valid linear regions found for fractal dimension calculation!")
+            print("This typically happens when:")
+            print("  1. Too few box sizes were generated")
+            print("  2. Box size range is too limited")
+            print("  3. Data quality is insufficient")
+            print("\nSuggestions:")
+            print("  - Use smaller min_box_size")
+            print("  - Use smaller box_size_factor (e.g., 1.2)")
+            print("  - Generate higher level fractals")
             
-            print(f"{window_size:11d} | {best_start:9d} | {best_end:7d} | {best_dimension:9.6f} | {best_error:5.6f} | {best_r2:.6f}")
+            # Return fallback values to prevent crash
+            if return_box_data:
+                return [], [], [], [], 0, float('nan'), box_sizes, box_counts, bounding_box
+            else:
+                return [], [], [], [], 0, float('nan')
 
         # Enhancement for fractal_analyzer.py analyze_linear_region method
         # Find the window with dimension closest to theoretical or best R² WITH PHYSICAL CONSTRAINTS
@@ -959,9 +1109,10 @@ class FractalAnalyzer:
             return windows, dimensions, errors, r_squared, optimal_window, optimal_dimension, box_sizes, box_counts, bounding_box
         else:
             return windows, dimensions, errors, r_squared, optimal_window, optimal_dimension
- 
+
     def analyze_iterations(self, min_level=1, max_level=8, fractal_type=None, 
-                          box_ratio=0.3, no_plots=False, no_box_plot=False, box_size_factor=1.5):
+                              box_ratio=0.3, no_plots=False, no_box_plot=False, box_size_factor=1.5,
+                              use_grid_optimization=True, min_box_size=None):
         """
         Analyze how fractal dimension varies with iteration depth.
         Generates curves at different levels and calculates their dimensions.
@@ -978,13 +1129,13 @@ class FractalAnalyzer:
         print(f"Theoretical {type_used} dimension: {theoretical_dimension:.6f}")
     
         # Initialize results storage
-        levels = list(range(min_level, max_level + 1))
+        successful_levels = []  # Only store levels that succeeded
         dimensions = []
         errors = []
         r_squared = []
     
         # For each level, generate a curve and calculate its dimension
-        for level in levels:
+        for level in range(min_level, max_level + 1):
             print(f"\n--- Processing {type_used} curve at level {level} ---")
         
             # Generate the curve
@@ -993,10 +1144,18 @@ class FractalAnalyzer:
             # Calculate dimension by using linear region analysis WITH box data return
             results = self.analyze_linear_region(
                 segments, fractal_type=type_used, plot_results=False, 
-                box_size_factor=box_size_factor, return_box_data=True)  # <- REQUEST BOX DATA
+                box_size_factor=box_size_factor, return_box_data=True,
+                use_grid_optimization=use_grid_optimization,
+				min_box_size=min_box_size)
         
             # Unpack results including box data
             windows, dims, errs, r2s, optimal_window, optimal_dimension, box_sizes, box_counts, bounding_box = results
+        
+            # Check if analysis failed
+            if np.isnan(optimal_dimension):
+                print(f"Level {level} - Analysis failed: insufficient data for fractal dimension calculation")
+                print(f"Skipping level {level} and continuing with next level...")
+                continue
         
             # Get error for the optimal window
             error = errs[np.where(np.array(windows) == optimal_window)[0][0]]
@@ -1004,7 +1163,8 @@ class FractalAnalyzer:
             # Calculate R-squared for the optimal window
             r_value_squared = r2s[np.where(np.array(windows) == optimal_window)[0][0]]
         
-            # Store results
+            # Store results only for successful levels
+            successful_levels.append(level)
             dimensions.append(optimal_dimension)
             errors.append(error)
             r_squared.append(r_value_squared)
@@ -1033,11 +1193,21 @@ class FractalAnalyzer:
                 self._plot_loglog(box_sizes, box_counts, optimal_dimension, error, 
                                   custom_filename=dimension_file)
     
-        # Plot the dimension vs. level results
-        self._plot_dimension_vs_level(levels, dimensions, errors, r_squared, 
+        # Check if we have any successful results
+        if not successful_levels:
+            print("\nERROR: No levels could be successfully analyzed!")
+            print("All levels failed due to insufficient data.")
+            print("Try using smaller box_size_factor or manually specifying min_box_size.")
+            return [], [], [], []
+        
+        print(f"\nSuccessfully analyzed {len(successful_levels)} out of {max_level - min_level + 1} levels")
+        print(f"Successful levels: {successful_levels}")
+    
+        # Plot the dimension vs. level results using only successful levels
+        self._plot_dimension_vs_level(successful_levels, dimensions, errors, r_squared, 
                                      theoretical_dimension, type_used)
     
-        return levels, dimensions, errors, r_squared
+        return successful_levels, dimensions, errors, r_squared
 
 # ================ Plotting Functions ================
     def plot_results_separate(self, segments, box_sizes, box_counts, fractal_dimension, 
@@ -1590,8 +1760,8 @@ Examples:
     parser.add_argument('--generate', type=str, choices=['koch', 'sierpinski', 'minkowski', 'hilbert', 'dragon'],
                         help='Generate a fractal curve of specified type')
     parser.add_argument('--level', type=int, default=5, help='Level for fractal generation')
-    parser.add_argument('--min_box_size', type=float, default=0.001, 
-                        help='Minimum box size for calculation')
+    parser.add_argument('--min_box_size', type=float, default=None,
+                    help='Minimum box size for calculation (default: auto-estimated)')
     parser.add_argument('--max_box_size', type=float, default=None, 
                         help='Maximum box size for calculation (default: auto-determined)')
     parser.add_argument('--box_size_factor', type=float, default=1.5, 
@@ -1619,9 +1789,13 @@ Examples:
     parser.add_argument('--plot_separate', action='store_true',
                        help='Generate separate plots instead of combined format for publication')
     args = parser.parse_args()
+
+	# Convert disable flag to use flag once at the top
+    use_grid_optimization = not args.disable_grid_optimization
+    print(f"Grid optimization: {'ENABLED' if use_grid_optimization else 'DISABLED'}")
     
     # Display version info
-    print(f"Running Fractal Analyzer v26")
+    print(f"Running Fractal Analyzer fixed")
     print(f"-------------------------------")
     
     # Create analyzer instance
@@ -1654,12 +1828,12 @@ Examples:
         # Analyze linear region if requested
         if args.analyze_linear_region:
             print("\n=== Starting Linear Region Analysis ===\n")
-            use_grid_opt = not args.disable_grid_optimization  # Convert disable flag to use flag
             analyzer.analyze_linear_region(segments, args.fractal_type, not args.no_plot, 
                                          not args.no_box_plot, trim_boundary=args.trim_boundary,
                                          box_size_factor=args.box_size_factor,
-                                         use_grid_optimization=use_grid_opt,
-                                         plot_separate=args.plot_separate)
+                                         use_grid_optimization=use_grid_optimization,
+                                         plot_separate=args.plot_separate,
+										 min_box_size=args.min_box_size)
 
             print("\n=== Linear Region Analysis Complete ===\n")
             # Note: removed the return statement here
@@ -1685,9 +1859,6 @@ Examples:
                 else:
                     box_sizes, box_counts, bounding_box = analyzer.box_counting_with_grid_optimization(
                         segments, args.min_box_size, args.max_box_size, args.box_size_factor)
-
-                #box_sizes, box_counts, bounding_box = analyzer.box_counting_optimized(
-                #    segments, args.min_box_size, args.max_box_size, args.box_size_factor)
                 
                 # Calculate fractal dimension
                 fractal_dimension, error, intercept = analyzer.calculate_fractal_dimension(
@@ -1720,8 +1891,13 @@ Examples:
             return
         print("\n=== Starting Iteration Analysis ===\n")
         fractal_type = args.generate or args.fractal_type
+
         analyzer.analyze_iterations(args.min_level, args.max_level, fractal_type, 
-                                  no_plots=args.no_plot, no_box_plot=args.no_box_plot, box_size_factor=args.box_size_factor)
+                                  no_plots=args.no_plot, no_box_plot=args.no_box_plot, 
+                                  box_size_factor=args.box_size_factor,
+                                  use_grid_optimization=use_grid_optimization,
+								  min_box_size=args.min_box_size) 
+
         print("\n=== Iteration Analysis Complete ===\n")
         
     if not (args.analyze_linear_region or args.analyze_iterations or args.file or args.generate):
