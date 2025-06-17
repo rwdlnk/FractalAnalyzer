@@ -541,7 +541,8 @@ class FractalAnalyzer:
                     # Count boxes with this offset
                     count = self._count_boxes_with_offset(
                         segments, current_box_size, offset_x, offset_y,
-                        max_x, max_y, segment_grid, grid_width, grid_height, spatial_cell_size)
+                        max_x, max_y, segment_grid, grid_width, grid_height, spatial_cell_size,
+						min_x, min_y)
 
                     min_count = min(min_count, count)
                     max_count = max(max_count, count)
@@ -567,8 +568,11 @@ class FractalAnalyzer:
 
         return np.array(box_sizes), np.array(box_counts), (min_x, min_y, max_x, max_y)
 
+
     def _count_boxes_with_offset(self, segments, box_size, offset_x, offset_y,
-                               max_x, max_y, segment_grid, grid_width, grid_height, spatial_cell_size):
+                               max_x, max_y, segment_grid, grid_width, grid_height, spatial_cell_size,
+                               spatial_min_x, spatial_min_y):
+
         """Count occupied boxes with specific grid offset."""
         num_boxes_x = int(np.ceil((max_x - offset_x) / box_size))
         num_boxes_y = int(np.ceil((max_y - offset_y) / box_size))
@@ -583,10 +587,10 @@ class FractalAnalyzer:
                 box_ymax = box_ymin + box_size
 
                 # Find relevant grid cells for this box
-                min_cell_x = max(0, int((box_xmin - (offset_x - spatial_cell_size)) / spatial_cell_size))
-                max_cell_x = min(grid_width - 1, int((box_xmax - (offset_x - spatial_cell_size)) / spatial_cell_size))
-                min_cell_y = max(0, int((box_ymin - (offset_y - spatial_cell_size)) / spatial_cell_size))
-                max_cell_y = min(grid_height - 1, int((box_ymax - (offset_y - spatial_cell_size)) / spatial_cell_size))
+                min_cell_x = max(0, int((box_xmin - spatial_min_x) / spatial_cell_size))
+                max_cell_x = min(grid_width - 1, int((box_xmax - spatial_min_x) / spatial_cell_size))
+                min_cell_y = max(0, int((box_ymin - spatial_min_y) / spatial_cell_size))
+                max_cell_y = min(grid_height - 1, int((box_ymax - spatial_min_y) / spatial_cell_size))
 
                 segments_to_check = set()
                 for cell_x in range(min_cell_x, max_cell_x + 1):
