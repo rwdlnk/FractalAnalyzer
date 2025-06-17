@@ -1,4 +1,4 @@
-# rt_analyzer_v2.py
+# rt_analyzer.py
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -7,25 +7,29 @@ import os
 import re
 import time
 import glob
+import argparse
 from typing import Tuple, List, Dict, Optional
 from skimage import measure
 
 class RTAnalyzer:
     """Complete Rayleigh-Taylor simulation analyzer with fractal dimension calculation."""
 
-    def __init__(self, output_dir="./rt_analysis"):
+    def __init__(self, output_dir="./rt_analysis", use_grid_optimization=False, no_titles=False):
         """Initialize the RT analyzer."""
         self.output_dir = output_dir
+        self.use_grid_optimization = use_grid_optimization
+        self.no_titles = no_titles  # Add no_titles parameter
         os.makedirs(output_dir, exist_ok=True)
-    
+
         # Create fractal analyzer instance
         try:
-            from fractal_analyzer import FractalAnalyzer  # ← FIXED
-            self.fractal_analyzer = FractalAnalyzer()
-            print("Fractal analyzer initialized successfully")  # ← FIXED
+            from fractal_analyzer import FractalAnalyzer
+            # Pass no_titles to FractalAnalyzer
+            self.fractal_analyzer = FractalAnalyzer(no_titles=no_titles)
+            print(f"Fractal analyzer initialized (grid optimization: {'ENABLED' if use_grid_optimization else 'DISABLED'})")
         except ImportError as e:
-            print(f"Warning: fractal_analyzer module not found: {str(e)}")  # ← FIXED
-            print("Make sure fractal_analyzer.py is in the same directory")  # ← FIXED
+            print(f"Warning: fractal_analyzer module not found: {str(e)}")
+            print("Make sure fractal_analyzer.py is in the same directory")
             self.fractal_analyzer = None
     
     def read_vtk_file(self, vtk_file):
@@ -282,7 +286,7 @@ class RTAnalyzer:
                 'method': 'dalziel'
             }
 
-    def compute_fractal_dimension(self, data, min_box_size=0.001):
+    def compute_fractal_dimension(self, data, min_box_size=None):
         """Compute fractal dimension of the interface using basic box counting."""
         if self.fractal_analyzer is None:
             print("Fractal analyzer not available. Skipping fractal dimension calculation.")
@@ -308,6 +312,13 @@ class RTAnalyzer:
 
         print(f"Found {len(segments)} interface segments")
 
+        # AUTO-ESTIMATE min_box_size if not provided (like we did for fractals)
+        if min_box_size is None:
+            min_box_size = self.fractal_analyzer.estimate_min_box_size_from_segments(segments)
+            print(f"Auto-estimated min_box_size: {min_box_size:.6f}")
+        else:
+            print(f"Using provided min_box_size: {min_box_size:.6f}")
+
         try:
             # Use the basic analyze_linear_region method instead of non-existent analyze_fractal_segments
             results = self.fractal_analyzer.analyze_linear_region(
@@ -317,8 +328,9 @@ class RTAnalyzer:
                 plot_boxes=False,
                 trim_boundary=0,
                 box_size_factor=1.5,
-                use_grid_optimization=True,
-                return_box_data=True
+                use_grid_optimization=self.use_grid_optimization,
+                return_box_data=True,
+				min_box_size=min_box_size
             )
         
             # Unpack results - analyze_linear_region returns tuple when return_box_data=True
@@ -352,7 +364,7 @@ class RTAnalyzer:
                 'r_squared': np.nan
             }
     
-    def analyze_vtk_file(self, vtk_file, output_subdir=None, mixing_method='dalziel',h0=None):
+    def analyze_vtk_file(self, vtk_file, output_subdir=None, mixing_method='dalziel',h0=None,min_box_size=None):
         """Perform complete analysis on a single VTK file."""
         # Create subdirectory for this file if needed
         if output_subdir:
@@ -406,7 +418,11 @@ class RTAnalyzer:
         
         # Compute fractal dimension
         fd_start_time = time.time()
-        fd_results = self.compute_fractal_dimension(data)
+        if min_box_size is not None:
+            fd_results = self.compute_fractal_dimension(data, min_box_size=min_box_size)
+        else:
+            fd_results = self.compute_fractal_dimension(data)
+
         print(f"Fractal dimension: {fd_results['dimension']:.6f} ± {fd_results['error']:.6f} (R²={fd_results['r_squared']:.6f})")
         print(f"Fractal calculation time: {time.time() - fd_start_time:.2f} seconds")
         
@@ -432,7 +448,9 @@ class RTAnalyzer:
             
             plt.xlabel('X')
             plt.ylabel('Y')
-            plt.title(f'Rayleigh-Taylor Interface at t = {data["time"]:.3f} ({mixing_method} method)')
+            # Only add title if not disabled
+            if not self.no_titles:
+                plt.title(f'Rayleigh-Taylor Interface at t = {data["time"]:.3f} ({mixing_method} method)')
             plt.legend()
             plt.grid(True)
             plt.savefig(os.path.join(file_dir, 'interface_plot.png'), dpi=300)
@@ -460,7 +478,9 @@ class RTAnalyzer:
                 
                 plt.xlabel('Box Size')
                 plt.ylabel('Box Count')
-                plt.title(f'Fractal Dimension at t = {data["time"]:.3f}')
+                # Only add title if not disabled
+                if not self.no_titles:
+                    plt.title(f'Fractal Dimension at t = {data["time"]:.3f}')
                 plt.legend()
                 plt.grid(True)
                 plt.savefig(os.path.join(file_dir, 'fractal_dimension.png'), dpi=300)
@@ -631,7 +651,9 @@ class RTAnalyzer:
         plt.xscale('log', base=2)  # Use log scale with base 2
         plt.xlabel('Grid Resolution')
         plt.ylabel(f'Fractal Dimension at t={target_time}')
-        plt.title(f'Fractal Dimension Convergence at t={target_time} ({mixing_method} method)')
+        # Only add title if not disabled
+        if not self.no_titles:
+            plt.title(f'Fractal Dimension Convergence at t={target_time} ({mixing_method} method)')
         plt.grid(True)
         
         # Add grid points as labels
@@ -665,7 +687,9 @@ class RTAnalyzer:
         plt.xscale('log', base=2)
         plt.xlabel('Grid Resolution')
         plt.ylabel(f'Mixing Layer Thickness at t={target_time}')
-        plt.title(f'Mixing Layer Thickness Convergence at t={target_time} ({mixing_method} method)')
+        # Only add title if not disabled
+        if not self.no_titles:
+            plt.title(f'Mixing Layer Thickness Convergence at t={target_time} ({mixing_method} method)')
         plt.grid(True)
         plt.legend()
         
@@ -680,7 +704,9 @@ class RTAnalyzer:
             plt.xscale('log', base=2)
             plt.xlabel('Grid Resolution')
             plt.ylabel('Mixing Fraction')
-            plt.title(f'Mixing Fraction Convergence at t={target_time} (Dalziel method)')
+            # Only add title if not disabled
+            if not self.no_titles:
+                plt.title(f'Mixing Fraction Convergence at t={target_time} (Dalziel method)')
             plt.grid(True)
             plt.tight_layout()
             plt.savefig(os.path.join(output_dir, f"mixing_fraction_convergence.png"), dpi=300)
@@ -695,7 +721,9 @@ class RTAnalyzer:
         plt.plot(df['time'], df['hb'], 'g--', label='Lower', linewidth=2)
         plt.xlabel('Time')
         plt.ylabel('Mixing Layer Thickness')
-        plt.title(f'Mixing Layer Evolution ({mixing_method} method)')
+        # Only add title if not disabled
+        if not self.no_titles:
+            plt.title(f'Mixing Layer Evolution ({mixing_method} method)')
         plt.legend()
         plt.grid(True)
         plt.savefig(os.path.join(output_dir, f'mixing_evolution_{mixing_method}.png'), dpi=300)
@@ -711,7 +739,9 @@ class RTAnalyzer:
                        alpha=0.3, color='gray')
         plt.xlabel('Time')
         plt.ylabel('Fractal Dimension')
-        plt.title(f'Fractal Dimension Evolution ({mixing_method} method)')
+        # Only add title if not disabled
+        if not self.no_titles:
+            plt.title(f'Fractal Dimension Evolution ({mixing_method} method)')
         plt.grid(True)
         plt.savefig(os.path.join(output_dir, f'dimension_evolution_{mixing_method}.png'), dpi=300)
         plt.close()
@@ -721,7 +751,9 @@ class RTAnalyzer:
         plt.plot(df['time'], df['fd_r_squared'], 'm-o', linewidth=2)
         plt.xlabel('Time')
         plt.ylabel('R² Value')
-        plt.title(f'Fractal Dimension Fit Quality ({mixing_method} method)')
+        # Only add title if not disabled
+        if not self.no_titles:
+            plt.title(f'Fractal Dimension Fit Quality ({mixing_method} method)')
         plt.ylim(0, 1)
         plt.grid(True)
         plt.savefig(os.path.join(output_dir, f'r_squared_evolution_{mixing_method}.png'), dpi=300)
@@ -733,7 +765,9 @@ class RTAnalyzer:
             plt.plot(df['time'], df['mixing_fraction'], 'c-o', linewidth=2)
             plt.xlabel('Time')
             plt.ylabel('Mixing Fraction')
-            plt.title('Mixing Fraction Evolution (Dalziel method)')
+            # Only add title if not disabled
+            if not self.no_titles:
+                plt.title('Mixing Fraction Evolution (Dalziel method)')
             plt.grid(True)
             plt.savefig(os.path.join(output_dir, 'mixing_fraction_evolution.png'), dpi=300)
             plt.close()
@@ -759,7 +793,9 @@ class RTAnalyzer:
         lines2, labels2 = ax2.get_legend_handles_labels()
         ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
         
-        plt.title(f'Mixing Layer and Fractal Dimension Evolution ({mixing_method} method)')
+        # Only add title if not disabled
+        if not self.no_titles:
+            plt.title(f'Mixing Layer and Fractal Dimension Evolution ({mixing_method} method)')
         plt.grid(True)
         plt.savefig(os.path.join(output_dir, f'combined_evolution_{mixing_method}.png'), dpi=300)
         plt.close()
@@ -822,9 +858,6 @@ class RTAnalyzer:
         
         print(f"Using {num_box_sizes} box sizes for analysis")
         
-        # Use spatial index from BoxCounter to speed up calculations
-        bc = self.fractal_analyzer.box_counter
-        
         # Add small margin to bounding box
         margin = extent * 0.01
         min_x -= margin
@@ -838,7 +871,7 @@ class RTAnalyzer:
         
         # Determine grid cell size for spatial index (use smallest box size)
         grid_size = min_box_size * 2
-        segment_grid, grid_width, grid_height = bc.create_spatial_index(
+        segment_grid, grid_width, grid_height = self.fractal_analyzer.create_spatial_index(
             segments, min_x, min_y, max_x, max_y, grid_size)
         
         print(f"Spatial index created in {time.time() - start_time:.2f} seconds")
@@ -881,7 +914,7 @@ class RTAnalyzer:
                     count = 0
                     for seg_idx in segments_to_check:
                         (x1, y1), (x2, y2) = segments[seg_idx]
-                        if self.fractal_analyzer.base.liang_barsky_line_box_intersection(
+                        if self.fractal_analyzer.liang_barsky_line_box_intersection(
                                 x1, y1, x2, y2, box_xmin, box_ymin, box_xmax, box_ymax):
                             count += 1
                     
@@ -1048,7 +1081,9 @@ class RTAnalyzer:
             
             plt.xlabel('q')
             plt.ylabel('D(q)')
-            plt.title(f'Generalized Dimensions D(q) at t = {data["time"]:.2f}')
+            # Only add title if not disabled
+            if not self.no_titles:
+                plt.title(f'Generalized Dimensions D(q) at t = {data["time"]:.2f}')
             plt.grid(True)
             plt.legend()
             plt.savefig(os.path.join(output_dir, "multifractal_dimensions.png"), dpi=300)
@@ -1071,7 +1106,9 @@ class RTAnalyzer:
             
             plt.xlabel('α')
             plt.ylabel('f(α)')
-            plt.title(f'Multifractal Spectrum f(α) at t = {data["time"]:.2f}')
+            # Only add title if not disabled
+            if not self.no_titles:
+                plt.title(f'Multifractal Spectrum f(α) at t = {data["time"]:.2f}')
             plt.grid(True)
             plt.savefig(os.path.join(output_dir, "multifractal_spectrum.png"), dpi=300)
             plt.close()
@@ -1082,7 +1119,9 @@ class RTAnalyzer:
             plt.plot(q_values[valid], r_squared[valid], 'go-', markersize=4)
             plt.xlabel('q')
             plt.ylabel('R²')
-            plt.title(f'Fit Quality for Different q Values at t = {data["time"]:.2f}')
+            # Only add title if not disabled
+            if not self.no_titles:
+                plt.title(f'Fit Quality for Different q Values at t = {data["time"]:.2f}')
             plt.grid(True)
             plt.savefig(os.path.join(output_dir, "multifractal_r_squared.png"), dpi=300)
             plt.close()
@@ -1204,7 +1243,9 @@ class RTAnalyzer:
             plt.plot(x_values, D2_values, 'go-', label='D(2) - Correlation dimension')
             plt.xlabel(x_label)
             plt.ylabel('Generalized Dimensions')
-            plt.title(f'Evolution of Generalized Dimensions with {x_label}')
+            # Only add title if not disabled
+            if not self.no_titles:
+                plt.title(f'Evolution of Generalized Dimensions with {x_label}')
             plt.grid(True)
             plt.legend()
             plt.savefig(os.path.join(output_dir, "dimensions_evolution.png"), dpi=300)
@@ -1216,7 +1257,9 @@ class RTAnalyzer:
             plt.plot(x_values, degree_mf, 'cd-', label='Degree of multifractality')
             plt.xlabel(x_label)
             plt.ylabel('Parameter Value')
-            plt.title(f'Evolution of Multifractal Parameters with {x_label}')
+            # Only add title if not disabled
+            if not self.no_titles:
+                plt.title(f'Evolution of Multifractal Parameters with {x_label}')
             plt.grid(True)
             plt.legend()
             plt.savefig(os.path.join(output_dir, "multifractal_params_evolution.png"), dpi=300)
@@ -1244,7 +1287,9 @@ class RTAnalyzer:
                 ax.set_xlabel(x_label)
                 ax.set_ylabel('q')
                 ax.set_zlabel('D(q)')
-                ax.set_title(f'Evolution of D(q) Spectrum with {x_label}')
+                # Only add title if not disabled
+                if not self.no_titles:
+                    ax.set_title(f'Evolution of D(q) Spectrum with {x_label}')
                 
                 fig.colorbar(surf, ax=ax, shrink=0.5, aspect=5, label='D(q)')
                 plt.savefig(os.path.join(output_dir, "Dq_evolution_3D.png"), dpi=300)
@@ -1266,3 +1311,170 @@ class RTAnalyzer:
             summary_df.to_csv(os.path.join(output_dir, "multifractal_evolution_summary.csv"), index=False)
         
         return results
+
+
+def main():
+    """Main function to run RT analyzer from command line."""
+    parser = argparse.ArgumentParser(
+        description='Rayleigh-Taylor Simulation Analyzer with Fractal Dimension Calculation',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Analyze a single VTK file
+  python rt_analyzer.py --file RT_0009000.vtk
+
+  # Process a time series with Dalziel mixing method
+  python rt_analyzer.py --pattern "RT_*.vtk" --mixing_method dalziel
+
+  # Analyze resolution convergence
+  python rt_analyzer.py --convergence --files file1.vtk file2.vtk --resolutions 128 256
+
+  # Disable plot titles for journal submission
+  python rt_analyzer.py --file RT_0009000.vtk --no_titles
+
+  # Use grid optimization for fractal dimension calculation
+  python rt_analyzer.py --file RT_0009000.vtk --use_grid_optimization
+""")
+    
+    parser.add_argument('--file', help='Single VTK file to analyze')
+    parser.add_argument('--pattern', help='Pattern for VTK files (e.g., "RT_*.vtk")')
+    parser.add_argument('--files', nargs='+', help='List of VTK files for convergence analysis')
+    parser.add_argument('--resolutions', nargs='+', type=int, 
+                       help='Grid resolutions corresponding to files (for convergence analysis)')
+    parser.add_argument('--output_dir', default='./rt_analysis', 
+                       help='Output directory for results (default: ./rt_analysis)')
+    parser.add_argument('--mixing_method', choices=['geometric', 'statistical', 'dalziel'], 
+                       default='dalziel', help='Method for computing mixing thickness')
+    parser.add_argument('--h0', type=float, help='Initial interface position (auto-detected if not provided)')
+    parser.add_argument('--min_box_size', type=float, 
+                       help='Minimum box size for fractal analysis (auto-estimated if not provided)')
+    parser.add_argument('--target_time', type=float, default=9.0,
+                       help='Target time for convergence analysis (default: 9.0)')
+    parser.add_argument('--convergence', action='store_true',
+                       help='Perform resolution convergence analysis')
+    parser.add_argument('--use_grid_optimization', action='store_true',
+                       help='Use grid optimization for fractal dimension calculation')
+    parser.add_argument('--no_titles', action='store_true',
+                       help='Disable plot titles for journal submissions')
+    parser.add_argument('--multifractal', action='store_true',
+                       help='Perform multifractal analysis')
+    parser.add_argument('--q_values', nargs='+', type=float,
+                       help='Q values for multifractal analysis (default: -5 to 5 in 0.5 steps)')
+    
+    args = parser.parse_args()
+    
+    # Validate arguments
+    if not any([args.file, args.pattern, args.convergence]):
+        print("Error: Must specify --file, --pattern, or --convergence")
+        parser.print_help()
+        return
+    
+    if args.convergence and not (args.files and args.resolutions):
+        print("Error: --convergence requires --files and --resolutions")
+        parser.print_help()
+        return
+    
+    if args.convergence and len(args.files) != len(args.resolutions):
+        print("Error: Number of files must match number of resolutions")
+        return
+    
+    # Create analyzer instance
+    analyzer = RTAnalyzer(
+        output_dir=args.output_dir,
+        use_grid_optimization=args.use_grid_optimization,
+        no_titles=args.no_titles  # Pass the no_titles flag
+    )
+    
+    print(f"RT Analyzer initialized")
+    print(f"Output directory: {args.output_dir}")
+    print(f"Mixing method: {args.mixing_method}")
+    print(f"Grid optimization: {'ENABLED' if args.use_grid_optimization else 'DISABLED'}")
+    print(f"Plot titles: {'DISABLED' if args.no_titles else 'ENABLED'}")
+    
+    try:
+        if args.file:
+            # Analyze single file
+            print(f"\nAnalyzing single file: {args.file}")
+            result = analyzer.analyze_vtk_file(
+                args.file, 
+                mixing_method=args.mixing_method,
+                h0=args.h0,
+                min_box_size=args.min_box_size
+            )
+            
+            print(f"\nResults for {args.file}:")
+            print(f"  Time: {result['time']:.6f}")
+            print(f"  Mixing thickness: {result['h_total']:.6f}")
+            print(f"  Fractal dimension: {result['fractal_dim']:.6f} ± {result['fd_error']:.6f}")
+            print(f"  R²: {result['fd_r_squared']:.6f}")
+            
+            # Multifractal analysis if requested
+            if args.multifractal:
+                print(f"\nPerforming multifractal analysis...")
+                data = analyzer.read_vtk_file(args.file)
+                q_values = args.q_values if args.q_values else None
+                
+                output_dir = os.path.join(args.output_dir, "multifractal")
+                mf_results = analyzer.compute_multifractal_spectrum(
+                    data, 
+                    min_box_size=args.min_box_size or 0.001,
+                    q_values=q_values,
+                    output_dir=output_dir
+                )
+                
+                if mf_results:
+                    print(f"Multifractal analysis complete. Results saved to {output_dir}")
+        
+        elif args.pattern:
+            # Process time series
+            print(f"\nProcessing time series with pattern: {args.pattern}")
+            df = analyzer.process_vtk_series(
+                args.pattern,
+                mixing_method=args.mixing_method
+            )
+            
+            if df is not None:
+                print(f"\nTime series analysis complete:")
+                print(f"  Processed {len(df)} files")
+                print(f"  Time range: {df['time'].min():.3f} to {df['time'].max():.3f}")
+                print(f"  Final mixing thickness: {df['h_total'].iloc[-1]:.6f}")
+                print(f"  Final fractal dimension: {df['fractal_dim'].iloc[-1]:.6f}")
+        
+        elif args.convergence:
+            # Resolution convergence analysis
+            print(f"\nPerforming resolution convergence analysis")
+            print(f"Files: {args.files}")
+            print(f"Resolutions: {args.resolutions}")
+            print(f"Target time: {args.target_time}")
+            
+            df = analyzer.analyze_resolution_convergence(
+                args.files,
+                args.resolutions,
+                target_time=args.target_time,
+                mixing_method=args.mixing_method
+            )
+            
+            if df is not None:
+                print(f"\nConvergence analysis complete:")
+                print(f"  Analyzed {len(df)} resolutions")
+                print(f"  Resolution range: {min(args.resolutions)} to {max(args.resolutions)}")
+                
+                # Show convergence trends
+                if len(df) >= 2:
+                    fd_change = df['fractal_dim'].iloc[-1] - df['fractal_dim'].iloc[-2]
+                    mixing_change = df['h_total'].iloc[-1] - df['h_total'].iloc[-2]
+                    print(f"  Last fractal dimension change: {fd_change:.6f}")
+                    print(f"  Last mixing thickness change: {mixing_change:.6f}")
+    
+    except Exception as e:
+        print(f"Error during analysis: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return 1
+    
+    print(f"\nAnalysis complete. Results saved to: {args.output_dir}")
+    return 0
+
+
+if __name__ == "__main__":
+    exit(main())
