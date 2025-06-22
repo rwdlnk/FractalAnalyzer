@@ -16,14 +16,13 @@ from typing import Tuple, List, Dict, Optional
 class FractalAnalyzer:
     """Universal fractal dimension analysis tool."""
     
-    def __init__(self, fractal_type: Optional[str] = None, no_titles: bool = False, eps_plots: bool = False):
+    def __init__(self, fractal_type: Optional[str] = None, no_titles: bool = False):
         """
         Initialize the fractal analyzer.
         
         Args:
             fractal_type: Type of fractal if known (koch, sierpinski, etc.)
             no_titles: If True, disable plot titles for journal submissions
-            eps_plots: If True, save plots in EPS format for publication
         """
         self.theoretical_dimensions = {
             'koch': np.log(4) / np.log(3),      # ≈ 1.2619
@@ -34,85 +33,6 @@ class FractalAnalyzer:
         }
         self.fractal_type = fractal_type
         self.no_titles = no_titles
-        self.eps_plots = eps_plots
-        
-        # Configure matplotlib for EPS output if requested
-        if self.eps_plots:
-            self._configure_matplotlib_for_eps()
-    
-    def _configure_matplotlib_for_eps(self):
-        """Configure matplotlib for high-quality EPS output meeting AMC requirements."""
-        import matplotlib
-        
-        # Set backend that supports EPS
-        matplotlib.use('Agg')
-        
-        # Configure for publication-quality EPS
-        plt.rcParams.update({
-            'font.size': 12,
-            'font.family': 'serif',
-            'font.serif': ['Times New Roman', 'Liberation Serif', 'DejaVu Serif', 'Times'],
-            'text.usetex': False,  # Set to True if LaTeX is available
-            'axes.linewidth': 1.0,
-            'axes.labelsize': 12,
-            'axes.titlesize': 14,
-            'xtick.labelsize': 10,
-            'ytick.labelsize': 10,
-            'legend.fontsize': 10,
-            'figure.figsize': [8, 6],  # AMC recommended size
-            'figure.dpi': 300,  # High DPI for quality
-            'savefig.dpi': 300,
-            'savefig.format': 'eps',
-            'savefig.bbox': 'tight',
-            'savefig.pad_inches': 0.1,
-            'lines.linewidth': 1.5,
-            'lines.markersize': 6,
-            'grid.linewidth': 0.5,
-            'grid.alpha': 0.7
-        })
-        
-        print("Configured matplotlib for publication-quality EPS output")
-    
-    def _get_plot_extension(self):
-        """Get the appropriate file extension for plots."""
-        return '.eps' if self.eps_plots else '.png'
-    
-    def _get_plot_dpi(self):
-        """Get the appropriate DPI for plots."""
-        return 300 if self.eps_plots else 300  # High DPI for both formats
-    
-    def _save_plot(self, filename_base, custom_dpi=None):
-        """
-        Save plot with appropriate format and settings.
-        
-        Args:
-            filename_base: Base filename without extension
-            custom_dpi: Override DPI if needed
-        """
-        extension = self._get_plot_extension()
-        filename = filename_base + extension
-        dpi = custom_dpi if custom_dpi else self._get_plot_dpi()
-        
-        try:
-            if self.eps_plots:
-                # EPS-specific save settings for AMC compliance
-                plt.savefig(filename, format='eps', dpi=dpi, bbox_inches='tight', 
-                           pad_inches=0.1, facecolor='white', edgecolor='none')
-                print(f"Saved EPS plot: {filename}")
-            else:
-                # PNG save settings
-                plt.savefig(filename, dpi=dpi, bbox_inches='tight', 
-                           facecolor='white', edgecolor='none')
-                print(f"Saved PNG plot: {filename}")
-                
-        except Exception as e:
-            print(f"Error saving plot {filename}: {str(e)}")
-            # Try simplified save
-            try:
-                plt.savefig(filename, format='eps' if self.eps_plots else 'png', dpi=150)
-                print(f"Saved simplified plot: {filename}")
-            except Exception as e2:
-                print(f"Failed to save plot completely: {str(e2)}")
     
     # ================ Fractal Generators ================
     
@@ -306,8 +226,8 @@ class FractalAnalyzer:
             segments.append(((points[i][0], points[i][1]), 
                             (points[i+1][0], points[i+1][1])))
     
-        return points, segments
-
+        return points, segments 
+    
     def _generate_dragon(self, level: int) -> Tuple[List, List]:
         """Generate Dragon curve at specified level."""
         
@@ -648,6 +568,7 @@ class FractalAnalyzer:
 
         return np.array(box_sizes), np.array(box_counts), (min_x, min_y, max_x, max_y)
 
+
     def _count_boxes_with_offset(self, segments, box_size, offset_x, offset_y,
                                max_x, max_y, segment_grid, grid_width, grid_height, spatial_cell_size,
                                spatial_min_x, spatial_min_y):
@@ -895,14 +816,6 @@ class FractalAnalyzer:
         Returns:
             float: Physics-based minimum box size
         """
-        # ADD DEBUG PRINTS HERE - at the very beginning
-        print(f"DEBUG: estimate_min_box_size_physics_based called")
-        print(f"DEBUG: segments count: {len(segments) if segments else 0}")
-        print(f"DEBUG: resolution: {resolution}")
-        print(f"DEBUG: domain_size: {domain_size}")
-        print(f"DEBUG: safety_factor: {safety_factor}")
-        print(f"DEBUG: fallback_percentile: {fallback_percentile}")
-
         print("=== PHYSICS-BASED BOX SIZE ESTIMATION ===")
     
         # Method 1: Resolution-based sizing (for simulation data)
@@ -974,7 +887,6 @@ class FractalAnalyzer:
                 min_box_size = adjusted
         
             print(f"  Final min box size: {min_box_size:.8f}")
-            print(f"DEBUG: FINAL calculated min_box_size: {min_box_size:.8f}")
             return min_box_size
 
     def _calculate_segment_lengths(self, segments):
@@ -1099,7 +1011,7 @@ class FractalAnalyzer:
 
         return min_box_size, max_box_size, warning_msg
 
-    # ================ Advanced Analysis Functions ================
+# ================ Advanced Analysis Functions ================
     def analyze_linear_region(self, segments, fractal_type=None, plot_results=True,
         plot_boxes=True, trim_boundary=0, box_size_factor=1.5, use_grid_optimization=True,
         return_box_data=False, plot_separate=False, min_box_size=None):
@@ -1472,11 +1384,11 @@ class FractalAnalyzer:
 
             # Plot results if requested - REUSE box counting data with CORRECT intercept!
             if not no_plots:
-                curve_file = f"{type_used}_level_{level}_curve"
-                dimension_file = f"{type_used}_level_{level}_dimension"
+                curve_file = f"{type_used}_level_{level}_curve.png"
+                dimension_file = f"{type_used}_level_{level}_dimension.png"
 
-                print(f"Plotting fractal curve to {curve_file}{self._get_plot_extension()}")
-                print(f"Plotting dimension analysis to {dimension_file}{self._get_plot_extension()}")
+                print(f"Plotting fractal curve to {curve_file}")
+                print(f"Plotting dimension analysis to {dimension_file}")
 
                 # Respect the no_box_plot parameter
                 plot_boxes = (level <= 6) and not no_box_plot
@@ -1538,46 +1450,46 @@ class FractalAnalyzer:
             if segment_count > 50000:
                 # Very large file-based dataset
                 matplotlib.rcParams['agg.path.chunksize'] = 100000
-                plot_dpi = 150 if not self.eps_plots else 300
+                plot_dpi = 150
                 fig_size = (14, 12)
                 use_rasterized = True
                 print(f"Very large file-based curve detected ({segment_count} segments). Using maximum optimization.")
             elif segment_count > 20000:
                 # Large file-based dataset
                 matplotlib.rcParams['agg.path.chunksize'] = 50000
-                plot_dpi = 200 if not self.eps_plots else 300
+                plot_dpi = 200
                 fig_size = (12, 10)
                 use_rasterized = True
                 print(f"Large file-based curve detected ({segment_count} segments). Using enhanced optimization.")
             elif segment_count > 5000:
                 # Medium file-based dataset
                 matplotlib.rcParams['agg.path.chunksize'] = 25000
-                plot_dpi = 250 if not self.eps_plots else 300
+                plot_dpi = 250
                 fig_size = (11, 9)
                 use_rasterized = True
                 print(f"Medium file-based curve detected ({segment_count} segments). Using standard optimization.")
             else:
                 # Small file-based dataset - default settings
                 matplotlib.rcParams['agg.path.chunksize'] = 20000
-                plot_dpi = self._get_plot_dpi()
+                plot_dpi = 300
                 fig_size = (10, 8)
                 use_rasterized = False
         elif self.fractal_type == 'koch' and level and level > 5:
             # Special settings for high-level Koch curves
-            matplotlib.rcParams['agg.path.chunksize'] = 50000
-            plot_dpi = 200 if not self.eps_plots else 300
-            fig_size = (12, 10)
+            matplotlib.rcParams['agg.path.chunksize'] = 50000  # Increased for Koch
+            plot_dpi = 200  # Lower DPI for very complex curves
+            fig_size = (12, 10)  # Larger figure size
             use_rasterized = True
         elif self.fractal_type in ['sierpinski', 'hilbert'] and level and level > 6:
             # Settings for other complex fractals
             matplotlib.rcParams['agg.path.chunksize'] = 30000
-            plot_dpi = 250 if not self.eps_plots else 300
+            plot_dpi = 250
             fig_size = (11, 9)
             use_rasterized = True
         else:
             # Default settings for less complex curves
             matplotlib.rcParams['agg.path.chunksize'] = 20000
-            plot_dpi = self._get_plot_dpi()
+            plot_dpi = 300
             fig_size = (10, 8)
             use_rasterized = False
 
@@ -1676,6 +1588,7 @@ class FractalAnalyzer:
                 curve_filename += '_with_boxes'
             if level is not None:
                 curve_filename += f'_Level_{level}'
+            curve_filename += '.png'
 
         # Add memory cleanup before saving large plots
         if segment_count > 20000:
@@ -1684,11 +1597,11 @@ class FractalAnalyzer:
             gc.collect()
 
         try:
-            print(f"Saving curve plot to {curve_filename}{self._get_plot_extension()} with DPI {plot_dpi}")
-            self._save_plot(curve_filename, plot_dpi)
-            print(f"Successfully saved plot to {curve_filename}{self._get_plot_extension()}")
+            print(f"Saving curve plot to {curve_filename} with DPI {plot_dpi}")
+            plt.savefig(curve_filename, dpi=plot_dpi)
+            print(f"Successfully saved plot to {curve_filename}")
         except Exception as e:
-            print(f"Error saving {curve_filename}: {str(e)}")
+            print(f"Error saving {curve_filename} at DPI {plot_dpi}: {str(e)}")
             # Try a more aggressive fallback with figure simplification
             try:
                 print("Attempting with simplified figure...")
@@ -1696,17 +1609,21 @@ class FractalAnalyzer:
                 plt.clf()  # Clear the figure
                 plt.plot([0, 1], [0, 1], 'k-', linewidth=1)
                 if not self.no_titles:
-                    plt.title(f"Simplified version - See log for details")
+                    plt.title(f"Simplified version of {title} - See log for details")
                 plt.text(0.5, 0.5, f"Full plot was too complex to save.\nSegment count: {segment_count}",
                          horizontalalignment='center', verticalalignment='center')
-                self._save_plot(curve_filename, 75)
-                print(f"Saved simplified placeholder to {curve_filename}{self._get_plot_extension()}")
+                plt.savefig(curve_filename, dpi=75)
+                print(f"Saved simplified placeholder to {curve_filename}")
             except Exception as e2:
                 print(f"Still failed to save: {str(e2)}")
                 print("Consider using --no_plot option for very large datasets")
 
         plt.close()
 
+        # Figure 2: Log-log plot (only if we're not using a custom_filename)
+        # For custom_filename (used in analyze_iterations), we now use the _plot_loglog
+        # method directly instead of handling it here
+		
     def _plot_box_overlay(self, segments, box_sizes, box_counts, bounding_box):
         """Plot box overlay for visual verification."""
         box_time = time.time()
@@ -1846,8 +1763,9 @@ class FractalAnalyzer:
             filename = 'box_counting_loglog'
             if self.fractal_type:
                 filename = f'{self.fractal_type}_box_counting_loglog'
+            filename += '.png'
 
-        self._save_plot(filename)
+        plt.savefig(filename, dpi=300)
         plt.close()
 
     def _plot_linear_region_analysis(self, windows, dimensions, errors, r_squared,
@@ -1919,8 +1837,7 @@ class FractalAnalyzer:
         filename = 'linear_region_analysis'
         if fractal_type:
             filename = f'{fractal_type}_linear_region_analysis'
-        
-        self._save_plot(filename)
+        plt.savefig(f'{filename}.png', dpi=300)
         plt.close()
 
     def _plot_dimension_vs_level(self, levels, dimensions, errors, r_squared,
@@ -1948,8 +1865,7 @@ class FractalAnalyzer:
         ax2.legend(loc='center right')
 
         plt.tight_layout()
-        filename = f'{fractal_type}_dimension_vs_level'
-        self._save_plot(filename)
+        plt.savefig(f'{fractal_type}_dimension_vs_level.png', dpi=300)
         plt.close()
 
     def _plot_window_analysis_separate(self, windows, dimensions, errors, r_squared,
@@ -2005,10 +1921,11 @@ class FractalAnalyzer:
         filename = 'sliding_window_analysis'
         if fractal_type:
             filename = f'{fractal_type}_sliding_window_analysis'
+        filename += '.png'
 
-        self._save_plot(filename)
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close()
-        print(f"Saved sliding window analysis to {filename}{self._get_plot_extension()}")
+        print(f"Saved sliding window analysis to {filename}")
 
     def _plot_loglog_with_region(self, log_sizes, log_counts, optimal_start, optimal_end,
                                optimal_dimension, error, fractal_type=None):
@@ -2068,10 +1985,11 @@ class FractalAnalyzer:
         filename = 'box_counting_with_optimal_region'
         if fractal_type:
             filename = f'{fractal_type}_box_counting_with_optimal_region'
+        filename += '.png'
 
-        self._save_plot(filename)
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close()
-        print(f"Saved log-log plot with optimal region to {filename}{self._get_plot_extension()}")
+        print(f"Saved log-log plot with optimal region to {filename}")
 
 def clean_memory():
     """Force garbage collection to free memory."""
@@ -2097,9 +2015,6 @@ Examples:
 
   # Run both analyses in sequence without titles
   python fractal_analyzer.py --generate dragon --analyze_linear_region --analyze_iterations --no-titles
-
-  # Generate publication-quality EPS plots for AMC journal
-  python fractal_analyzer.py --generate koch --level 5 --eps_plots --no-titles
 """)
     parser.add_argument('--file', help='Path to file containing line segments')
     parser.add_argument('--generate', type=str, choices=['koch', 'sierpinski', 'minkowski', 'hilbert', 'dragon'],
@@ -2135,24 +2050,18 @@ Examples:
                        help='Disable plot titles for journal submissions')
     parser.add_argument('--plot_separate', action='store_true',
                        help='Generate separate plots instead of combined format for publication')
-    parser.add_argument('--eps_plots', action='store_true',
-                       help='Generate EPS format plots for publication quality (AMC journal requirements)')
     args = parser.parse_args()
 
     # Convert disable flag to use flag once at the top
     use_grid_optimization = not args.disable_grid_optimization
     print(f"Grid optimization: {'ENABLED' if use_grid_optimization else 'DISABLED'}")
 
-    # Display version info with EPS status
+    # Display version info
     print(f"Running Enhanced Fractal Analyzer")
     print(f"----------------------------------")
-    if args.eps_plots:
-        print(f"EPS plots: ENABLED (Publication quality for AMC journal)")
-    else:
-        print(f"EPS plots: DISABLED (Using PNG format)")
 
-    # Create analyzer instance with all settings
-    analyzer = FractalAnalyzer(args.fractal_type, no_titles=args.no_titles, eps_plots=args.eps_plots)
+    # Create analyzer instance with no_titles setting
+    analyzer = FractalAnalyzer(args.fractal_type, no_titles=args.no_titles)
 
     # Clean memory before starting
     clean_memory()
@@ -2160,10 +2069,7 @@ Examples:
     # Generate a fractal curve if requested
     if args.generate:
         _, segments = analyzer.generate_fractal(args.generate, args.level)
-
-        # Choose appropriate extension for output file
-        extension = '.eps' if args.eps_plots else '.txt'
-        filename = f'{args.generate}_segments_level_{args.level}.txt'  # Keep data file as .txt
+        filename = f'{args.generate}_segments_level_{args.level}.txt'
         analyzer.write_segments_to_file(segments, filename)
         print(f"{args.generate.capitalize()} curve saved to {filename}")
 
@@ -2184,8 +2090,6 @@ Examples:
         # Analyze linear region if requested
         if args.analyze_linear_region:
             print("\n=== Starting Linear Region Analysis ===\n")
-            if args.eps_plots:
-                print("Generating publication-quality EPS plots for linear region analysis...")
             analyzer.analyze_linear_region(segments, args.fractal_type, not args.no_plot,
                                          not args.no_box_plot, trim_boundary=args.trim_boundary,
                                          box_size_factor=args.box_size_factor,
@@ -2234,8 +2138,6 @@ Examples:
 
                 # Plot if requested
                 if not args.no_plot:
-                    if args.eps_plots:
-                        print("Generating publication-quality EPS plots...")
                     analyzer.plot_results_separate(segments, box_sizes, box_counts,
                                                  fractal_dimension, error, bounding_box, intercept,
                                                  plot_boxes=not args.no_box_plot)
@@ -2252,8 +2154,6 @@ Examples:
             print("Error: Must specify --fractal_type or --generate for iteration analysis")
             return
         print("\n=== Starting Iteration Analysis ===\n")
-        if args.eps_plots:
-            print("Generating publication-quality EPS plots for iteration analysis...")
         fractal_type = args.generate or args.fractal_type
 
         analyzer.analyze_iterations(args.min_level, args.max_level, fractal_type,
@@ -2268,20 +2168,6 @@ Examples:
         print("No input file specified and no curve generation requested.")
         print("Use --file to specify an input file or --generate to create a fractal curve.")
         parser.print_help()
-
-    # Print final summary
-    if args.eps_plots:
-        print("\n" + "="*60)
-        print("PUBLICATION-QUALITY EPS PLOTS GENERATED")
-        print("="*60)
-        print("All plots have been saved in EPS format with the following features:")
-        print("• High resolution (300 DPI)")
-        print("• Vector format for scalability")
-        print("• Publication-ready fonts and sizing")
-        print("• AMC journal compliant formatting")
-        print("• Tight bounding boxes for optimal layout")
-        print("\nThese EPS files are ready for submission to Applied Mathematics and Computation")
-        print("or other academic journals requiring vector graphics.")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-# rt_analyzer.py
+# rt_analyzer_v2.py
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -7,25 +7,22 @@ import os
 import re
 import time
 import glob
-import argparse
 from typing import Tuple, List, Dict, Optional
 from skimage import measure
 
 class RTAnalyzer:
     """Complete Rayleigh-Taylor simulation analyzer with fractal dimension calculation."""
 
-    def __init__(self, output_dir="./rt_analysis", use_grid_optimization=False, no_titles=False):
+    def __init__(self, output_dir="./rt_analysis", use_grid_optimization=False):  # DEFAULT TO FALSE
         """Initialize the RT analyzer."""
         self.output_dir = output_dir
-        self.use_grid_optimization = use_grid_optimization
-        self.no_titles = no_titles  # Add no_titles parameter
+        self.use_grid_optimization = use_grid_optimization  # STORE THE SETTING
         os.makedirs(output_dir, exist_ok=True)
 
         # Create fractal analyzer instance
         try:
             from fractal_analyzer import FractalAnalyzer
-            # Pass no_titles to FractalAnalyzer
-            self.fractal_analyzer = FractalAnalyzer(no_titles=no_titles)
+            self.fractal_analyzer = FractalAnalyzer()
             print(f"Fractal analyzer initialized (grid optimization: {'ENABLED' if use_grid_optimization else 'DISABLED'})")
         except ImportError as e:
             print(f"Warning: fractal_analyzer module not found: {str(e)}")
@@ -125,460 +122,6 @@ class RTAnalyzer:
             'time': sim_time
         }
     
-
-    def auto_detect_resolution_from_vtk_filename(self, vtk_file):
-        """
-        Extract resolution from VTK filename patterns like RT800x800-5999.vtk
-        
-        Args:
-            vtk_file: Path to the VTK file
-            
-        Returns:
-            int or None: Detected resolution or None if not found
-        """
-        import re
-        import os
-        
-        basename = os.path.basename(vtk_file)
-        
-        # Pattern for RT###x###-*.vtk files
-        pattern = r'RT(\d+)x(\d+)'
-        match = re.search(pattern, basename)
-        
-        if match:
-            res_x = int(match.group(1))
-            res_y = int(match.group(2))
-            if res_x == res_y:
-                print(f"  Auto-detected resolution from VTK filename: {res_x}x{res_y}")
-                return res_x
-            else:
-                print(f"  Warning: Non-square resolution detected: {res_x}x{res_y}")
-                return max(res_x, res_y)
-        
-        # Try to extract from directory path as fallback
-        dir_pattern = r'(\d+)x(\d+)'
-        dir_match = re.search(dir_pattern, vtk_file)
-        
-        if dir_match:
-            res_x = int(dir_match.group(1))
-            res_y = int(dir_match.group(2))
-            if res_x == res_y:
-                print(f"  Auto-detected resolution from path: {res_x}x{res_y}")
-                return res_x
-        
-        print(f"  Could not auto-detect resolution from: {basename}")
-        return None
-
-    def calculate_physics_based_min_box_size(self, resolution, domain_size=1.0, safety_factor=4):
-        """
-        Calculate minimum box size based on grid resolution with adaptive safety factor.
-    
-        Args:
-            resolution: Grid resolution (e.g., 800 for 800x800)
-            domain_size: Physical domain size (default: 1.0 for unit domain)
-            safety_factor: Multiple of grid spacing (default: 4, but will be adapted)
-    
-        Returns:
-            float: Physics-based minimum box size
-        """
-        if resolution is None:
-            return None
-    
-        grid_spacing = domain_size / resolution
-        max_box_size = domain_size / 2  # Typical maximum
-    
-        # ADAPTIVE SAFETY FACTOR for low resolutions
-        if resolution <= 128:
-            # For very coarse grids, use smaller safety factor to ensure scaling range
-            adaptive_safety_factor = 2  # More aggressive for coarse grids
-            print(f"  Low resolution detected: using adaptive safety factor {adaptive_safety_factor}")
-        else:
-            adaptive_safety_factor = safety_factor
-    
-        min_box_size = adaptive_safety_factor * grid_spacing
-    
-        # VALIDATE SCALING RANGE
-        scaling_ratio = min_box_size / max_box_size
-        min_scaling_ratio = 0.005  # Need at least ~2.3 decades
-    
-        if scaling_ratio > min_scaling_ratio:
-            # Adjust min_box_size to ensure sufficient scaling range
-            adjusted_min_box_size = max_box_size * min_scaling_ratio
-            print(f"  Scaling range too limited (ratio: {scaling_ratio:.4f})")
-            print(f"  Adjusting min_box_size from {min_box_size:.8f} to {adjusted_min_box_size:.8f}")
-            min_box_size = adjusted_min_box_size
-            effective_safety_factor = min_box_size / grid_spacing
-            print(f"  Effective safety factor: {effective_safety_factor:.1f}×Δx")
-        else:
-            effective_safety_factor = adaptive_safety_factor
-    
-        print(f"  Physics-based box sizing:")
-        print(f"    Resolution: {resolution}x{resolution}")
-        print(f"    Grid spacing (Δx): {grid_spacing:.8f}")
-        print(f"    Safety factor: {effective_safety_factor:.1f}")
-        print(f"    Min box size: {min_box_size:.8f} ({effective_safety_factor:.1f}×Δx)")
-        print(f"    Max box size: {max_box_size:.8f}")
-        print(f"    Scaling ratio: {min_box_size/max_box_size:.6f}")
-        print(f"    Expected decades: {np.log10(max_box_size/min_box_size):.2f}")
-    
-        return min_box_size
-
-    def determine_optimal_min_box_size(self, vtk_file, segments, user_min_box_size=None):
-        """
-        Determine the optimal minimum box size using physics-based approach.
-        
-        Args:
-            vtk_file: Path to VTK file (for resolution detection)
-            segments: Interface segments 
-            user_min_box_size: User-specified value (takes precedence)
-        
-        Returns:
-            float: Optimal minimum box size
-        """
-        print(f"Determining optimal min_box_size for: {os.path.basename(vtk_file)}")
-        
-        # User override always takes precedence
-        if user_min_box_size is not None:
-            print(f"  Using user-specified min_box_size: {user_min_box_size:.8f}")
-            return user_min_box_size
-        
-        # Try physics-based approach first
-        resolution = self.auto_detect_resolution_from_vtk_filename(vtk_file)
-        
-        if resolution is not None:
-            # Physics-based calculation
-            physics_min_box_size = self.calculate_physics_based_min_box_size(resolution)
-            
-            # Validate against actual segment data
-            if segments:
-                lengths = []
-                for (x1, y1), (x2, y2) in segments:
-                    length = np.sqrt((x2-x1)**2 + (y2-y1)**2)
-                    if length > 0:
-                        lengths.append(length)
-                
-                if lengths:
-                    min_segment = np.min(lengths)
-                    median_segment = np.median(lengths)
-                    
-                    print(f"  Validation against interface segments:")
-                    print(f"    Min segment length: {min_segment:.8f}")
-                    print(f"    Median segment length: {median_segment:.8f}")
-                    
-                    # Ensure we're not going below reasonable limits
-                    if physics_min_box_size < min_segment * 0.1:
-                        adjusted = min_segment * 0.5  # More conservative
-                        print(f"    → Physics size too small, adjusting to: {adjusted:.8f}")
-                        return adjusted
-            
-            return physics_min_box_size
-        
-        else:
-            # Fallback to robust statistical approach
-            print(f"  Resolution not detected, using robust statistical approach")
-            return self.calculate_robust_min_box_size(segments)
-
-    def calculate_robust_min_box_size(self, segments, percentile=10):
-        """
-        Robust statistical approach for when resolution is unknown.
-        
-        Args:
-            segments: Interface segments
-            percentile: Percentile of segment lengths to use (default: 10)
-        
-        Returns:
-            float: Statistically robust minimum box size
-        """
-        if not segments:
-            print("    Warning: No segments for statistical analysis")
-            return 0.001
-        
-        lengths = []
-        for (x1, y1), (x2, y2) in segments:
-            length = np.sqrt((x2-x1)**2 + (y2-y1)**2)
-            if length > 0:
-                lengths.append(length)
-        
-        if not lengths:
-            print("    Warning: No valid segment lengths")
-            return 0.001
-        
-        lengths = np.array(lengths)
-        
-        # Use percentile instead of minimum to avoid noise
-        robust_length = np.percentile(lengths, percentile)
-        
-        # Calculate domain extent for scaling validation
-        min_x = min(min(s[0][0], s[1][0]) for s in segments)
-        max_x = max(max(s[0][0], s[1][0]) for s in segments)
-        min_y = min(min(s[0][1], s[1][1]) for s in segments)
-        max_y = max(max(s[0][1], s[1][1]) for s in segments)
-        extent = max(max_x - min_x, max_y - min_y)
-        
-        print(f"    Statistical analysis:")
-        print(f"      {percentile}th percentile length: {robust_length:.8f}")
-        print(f"      Domain extent: {extent:.6f}")
-        
-        # Use conservative multiplier
-        min_box_size = robust_length * 0.8  # Slightly smaller than percentile
-        
-        # Ensure sufficient scaling range (at least 2 decades)
-        max_box_size = extent / 2
-        if min_box_size / max_box_size > 0.01:
-            adjusted = max_box_size * 0.005  # Force ~2.3 decades
-            print(f"      → Adjusting for scaling range: {adjusted:.8f}")
-            min_box_size = adjusted
-        
-        print(f"    Final robust min_box_size: {min_box_size:.8f}")
-        return min_box_size
-
-    # Enhanced validity check methods to add to RTAnalyzer class in rt_analyzer.py
-
-    def _estimate_grid_spacing(self, data):
-        """
-        Estimate grid spacing from VTK data structure.
-    
-        Args:
-            data: VTK data dictionary containing x, y grids
-        
-        Returns:
-            float: Estimated grid spacing (Δx)
-        """
-        try:
-            # Extract x-coordinates from the first row
-            x_coords = data['x'][:, 0] if len(data['x'].shape) > 1 else data['x']
-        
-            # Calculate spacing (should be uniform for structured grids)
-            if len(x_coords) > 1:
-                dx = np.abs(x_coords[1] - x_coords[0])
-            
-                # Verify uniformity (check a few more points)
-                if len(x_coords) > 3:
-                    dx_check = np.abs(x_coords[2] - x_coords[1])
-                    if abs(dx - dx_check) / dx > 0.01:  # More than 1% difference
-                        print(f"Warning: Non-uniform grid spacing detected")
-                        print(f"  First spacing: {dx:.8f}, Second: {dx_check:.8f}")
-            
-                return dx
-            else:
-                print("Warning: Cannot determine grid spacing - insufficient grid points")
-                return None
-            
-        except Exception as e:
-            print(f"Warning: Error estimating grid spacing: {e}")
-            return None
-
-    def check_analysis_validity(self, resolution=None, mixing_thickness=None, grid_spacing=None, 
-                              time=None, interface_segments=None):
-        """
-        Enhanced validity check accounting for multi-scale RT physics and time evolution.
-    
-        Args:
-            resolution: Grid resolution (e.g., 800 for 800x800)
-            mixing_thickness: Current mixing layer thickness
-            grid_spacing: Grid spacing (Δx) from VTK data
-            time: Simulation time
-            interface_segments: Interface segments for additional validation
-        
-        Returns:
-            dict: Comprehensive validity assessment
-        """
-        print(f"\n🔍 ANALYSIS VALIDITY CHECK")
-        print(f"=" * 50)
-    
-        validity_status = {
-            'overall_valid': True,
-            'warnings': [],
-            'critical_issues': [],
-            'recommendations': [],
-            'metrics': {}
-        }
-    
-        # === BASIC RESOLUTION CHECK ===
-        if mixing_thickness is not None and grid_spacing is not None:
-            cells_across_mixing = mixing_thickness / grid_spacing
-            validity_status['metrics']['cells_across_mixing'] = cells_across_mixing
-        
-            print(f"📏 Resolution Analysis:")
-            print(f"   Mixing thickness: {mixing_thickness:.6f}")
-            print(f"   Grid spacing (Δx): {grid_spacing:.8f}")
-            print(f"   Cells across mixing: {cells_across_mixing:.1f}")
-        
-            # Critical threshold
-            if cells_across_mixing < 5:
-                validity_status['critical_issues'].append(
-                    f"CRITICAL: Only {cells_across_mixing:.1f} cells across mixing layer")
-                validity_status['overall_valid'] = False
-                validity_status['recommendations'].append(
-                    "Use higher resolution or analyze earlier times")
-        
-            # Warning thresholds
-            elif cells_across_mixing < 10:
-                validity_status['warnings'].append(
-                    f"Marginal resolution: {cells_across_mixing:.1f} cells across mixing")
-                validity_status['recommendations'].append(
-                    "Consider higher resolution for better accuracy")
-        
-            elif cells_across_mixing < 15:
-                validity_status['warnings'].append(
-                    f"Adequate but not optimal resolution: {cells_across_mixing:.1f} cells")
-    
-        # === TIME-DEPENDENT VALIDITY ===
-        if time is not None:
-            validity_status['metrics']['simulation_time'] = time
-        
-            print(f"⏰ Time-Dependent Analysis:")
-            print(f"   Simulation time: {time:.3f}")
-        
-            # Late-time requirements (turbulent cascade development)
-            if time >= 3.0:  # Late time when full cascade develops
-                if mixing_thickness is not None and grid_spacing is not None:
-                    required_cells_late = 20  # Higher requirement for late times
-                
-                    if cells_across_mixing < required_cells_late:
-                        validity_status['warnings'].append(
-                            f"Late-time warning (t={time:.1f}): Need >{required_cells_late} cells "
-                            f"for developed turbulence, have {cells_across_mixing:.1f}")
-                        validity_status['recommendations'].append(
-                            "Late-time analysis requires higher resolution to capture turbulent cascade")
-        
-            # Early time considerations
-            elif time < 1.0:
-                validity_status['recommendations'].append(
-                    "Early time analysis - interface may not have developed sufficient complexity")
-    
-        # === MULTI-SCALE PHYSICS CHECK ===
-        if resolution is not None and time is not None:
-            validity_status['metrics']['resolution'] = resolution
-        
-            print(f"🌊 Multi-Scale Physics Analysis:")
-            print(f"   Resolution: {resolution}x{resolution}")
-        
-            # Resolution-time coupling effects (based on your convergence findings)
-            if time >= 2.5:  # When scale-dependent effects emerge
-                if resolution == 200:
-                    validity_status['warnings'].append(
-                        "Resolution resonance regime: 200x200 may capture dominant plume scale optimally")
-                    validity_status['recommendations'].append(
-                        "Compare with higher resolution results to verify scale-dependent behavior")
-            
-                elif resolution == 400:
-                    validity_status['warnings'].append(
-                        "Transition regime: 400x400 may be between large plumes and fine turbulence")
-                    validity_status['recommendations'].append(
-                        "Consider this may be in intermediate resolution regime")
-        
-            # Very high resolution considerations
-            if resolution >= 1600:
-                validity_status['recommendations'].append(
-                    "High resolution analysis - capturing finest scales but computationally expensive")
-    
-        # === FRACTAL DIMENSION SPECIFIC CHECKS ===
-        if interface_segments is not None:
-            segment_count = len(interface_segments)
-            validity_status['metrics']['interface_segments'] = segment_count
-        
-            print(f"🔄 Fractal Analysis Readiness:")
-            print(f"   Interface segments: {segment_count}")
-        
-            if segment_count < 100:
-                validity_status['warnings'].append(
-                    f"Low segment count ({segment_count}) may limit fractal dimension accuracy")
-                validity_status['recommendations'].append(
-                    "Consider higher interface resolution or different contour level")
-        
-            elif segment_count > 50000:
-                validity_status['recommendations'].append(
-                    f"Very high segment count ({segment_count}) - analysis will be thorough but slow")
-    
-        # === BOX-COUNTING PREPARATION ===
-        if grid_spacing is not None:
-            # Estimate appropriate min_box_size for fractal analysis
-            suggested_min_box = 4 * grid_spacing  # Conservative safety factor
-            validity_status['metrics']['suggested_min_box_size'] = suggested_min_box
-        
-            print(f"📦 Box-Counting Preparation:")
-            print(f"   Suggested min box size: {suggested_min_box:.8f} ({4:.1f}×Δx)")
-        
-            # Check scaling range
-            domain_size = 1.0  # Assume unit domain
-            max_box_size = domain_size / 2
-            scaling_decades = np.log10(max_box_size / suggested_min_box)
-            validity_status['metrics']['scaling_decades'] = scaling_decades
-        
-            print(f"   Expected scaling range: {scaling_decades:.2f} decades")
-        
-            if scaling_decades < 1.5:
-                validity_status['warnings'].append(
-                    f"Limited scaling range: {scaling_decades:.2f} decades may affect accuracy")
-                validity_status['recommendations'].append(
-                    "Consider smaller min_box_size if computationally feasible")
-    
-        # === OVERALL ASSESSMENT ===
-        print(f"\n📋 VALIDITY SUMMARY:")
-    
-        if validity_status['overall_valid']:
-            if len(validity_status['warnings']) == 0:
-                print(f"   ✅ EXCELLENT: Analysis conditions are optimal")
-            elif len(validity_status['warnings']) <= 2:
-                print(f"   ✅ GOOD: Analysis is valid with minor considerations")
-            else:
-                print(f"   ⚠️  ACCEPTABLE: Analysis is valid but has multiple warnings")
-        else:
-            print(f"   ❌ PROBLEMATIC: Critical issues detected")
-    
-        # Print warnings and recommendations
-        if validity_status['warnings']:
-            print(f"\n⚠️  Warnings ({len(validity_status['warnings'])}):")
-            for i, warning in enumerate(validity_status['warnings'], 1):
-                print(f"   {i}. {warning}")
-    
-        if validity_status['critical_issues']:
-            print(f"\n❌ Critical Issues ({len(validity_status['critical_issues'])}):")
-            for i, issue in enumerate(validity_status['critical_issues'], 1):
-                print(f"   {i}. {issue}")
-    
-        if validity_status['recommendations']:
-            print(f"\n💡 Recommendations ({len(validity_status['recommendations'])}):")
-            for i, rec in enumerate(validity_status['recommendations'], 1):
-                print(f"   {i}. {rec}")
-    
-        print(f"=" * 50)
-    
-        return validity_status
-
-    def get_validity_summary_for_output(self, validity_status):
-        """
-        Generate a concise validity summary for inclusion in output files.
-    
-        Args:
-            validity_status: Dict returned from check_analysis_validity()
-        
-        Returns:
-            str: Formatted summary string
-        """
-        lines = []
-        lines.append("# ANALYSIS VALIDITY SUMMARY")
-        lines.append(f"# Overall Status: {'VALID' if validity_status['overall_valid'] else 'INVALID'}")
-    
-        if 'cells_across_mixing' in validity_status['metrics']:
-            lines.append(f"# Cells across mixing layer: {validity_status['metrics']['cells_across_mixing']:.1f}")
-    
-        if 'scaling_decades' in validity_status['metrics']:
-            lines.append(f"# Fractal scaling range: {validity_status['metrics']['scaling_decades']:.2f} decades")
-    
-        if validity_status['warnings']:
-            lines.append(f"# Warnings: {len(validity_status['warnings'])}")
-            for warning in validity_status['warnings']:
-                lines.append(f"#   - {warning}")
-    
-        if validity_status['critical_issues']:
-            lines.append(f"# Critical Issues: {len(validity_status['critical_issues'])}")
-            for issue in validity_status['critical_issues']:
-                lines.append(f"#   - {issue}")
-    
-        return '\n'.join(lines)
-
     def extract_interface(self, f_grid, x_grid, y_grid, level=0.5):
         """Extract the interface contour at level f=0.5 using marching squares algorithm."""
         # Find contours
@@ -766,14 +309,10 @@ class RTAnalyzer:
 
         print(f"Found {len(segments)} interface segments")
 
-        # PHYSICS-BASED AUTO-ESTIMATION - REPLACE PROBLEMATIC SEGMENT-BASED METHOD
-        # Note: This method needs vtk_file path, so we'll handle this in analyze_vtk_file instead
+        # AUTO-ESTIMATE min_box_size if not provided (like we did for fractals)
         if min_box_size is None:
-            # Fallback to original method for backward compatibility
-            # The optimal approach is to call determine_optimal_min_box_size from analyze_vtk_file
             min_box_size = self.fractal_analyzer.estimate_min_box_size_from_segments(segments)
-            print(f"Fallback auto-estimated min_box_size: {min_box_size:.6f}")
-            print(f"  (Note: For better results, pass min_box_size from analyze_vtk_file)")
+            print(f"Auto-estimated min_box_size: {min_box_size:.6f}")
         else:
             print(f"Using provided min_box_size: {min_box_size:.6f}")
 
@@ -851,28 +390,7 @@ class RTAnalyzer:
         # Compute mixing thickness using specified method
         mixing = self.compute_mixing_thickness(data, h0, method=mixing_method)
         print(f"Mixing thickness ({mixing_method}): {mixing['h_total']:.6f} (ht={mixing['ht']:.6f}, hb={mixing['hb']:.6f})")
-
-        # Estimate grid spacing for validity check
-        grid_spacing = self._estimate_grid_spacing(data)
-        resolution = self.auto_detect_resolution_from_vtk_filename(vtk_file)
-        contours = self.extract_interface(data['f'], data['x'], data['y'])
-        segments = self.convert_contours_to_segments(contours)
-
-        validity_status = self.check_analysis_validity(
-            resolution=resolution,
-            mixing_thickness=mixing['h_total'],
-            grid_spacing=grid_spacing,
-            time=data['time'],
-            interface_segments=segments
-        )
-
-        if not validity_status['overall_valid']:
-            print("\n❌ CRITICAL VALIDITY ISSUES DETECTED!")
-        elif len(validity_status['warnings']) > 0:
-            print(f"\n⚠️  Analysis proceeding with {len(validity_status['warnings'])} warning(s)")
-        else:
-            print(f"\n✅ Analysis conditions are optimal")
-
+        
         # Additional diagnostics for Dalziel method
         if mixing_method == 'dalziel':
             print(f"  Mixing zone center: {mixing['y_center']:.6f}")
@@ -886,8 +404,6 @@ class RTAnalyzer:
         with open(interface_file, 'w') as f:
             f.write(f"# Interface data for t = {data['time']:.6f}\n")
             f.write(f"# Method: {mixing_method}\n")
-            validity_summary = self.get_validity_summary_for_output(validity_status)
-            f.write(validity_summary + '\n')
             segment_count = 0
             for contour in contours:
                 for i in range(len(contour) - 1):
@@ -898,32 +414,11 @@ class RTAnalyzer:
         print(f"Interface saved to {interface_file} ({segment_count} segments)")
         
         # Compute fractal dimension
-        # Compute fractal dimension with PHYSICS-BASED min_box_size determination
         fd_start_time = time.time()
-
-        # First, extract contours to get segments for validation
-        contours = self.extract_interface(data['f'], data['x'], data['y'])
-        segments = self.convert_contours_to_segments(contours)
-
-        if segments:
-            if min_box_size is None and 'suggested_min_box_size' in validity_status['metrics']:
-                optimal_min_box_size = validity_status['metrics']['suggested_min_box_size']
-                print(f"Using validity-recommended min_box_size: {optimal_min_box_size:.8f}")
-            else:
-                optimal_min_box_size = self.determine_optimal_min_box_size(
-                    vtk_file, segments, min_box_size)
-
-            # Now compute fractal dimension with the optimal box size
-            fd_results = self.compute_fractal_dimension(data, min_box_size=optimal_min_box_size)
-    
-            print(f"Used min_box_size: {optimal_min_box_size:.8f}")
+        if min_box_size is not None:
+            fd_results = self.compute_fractal_dimension(data, min_box_size=min_box_size)
         else:
-            print("No interface segments found for fractal analysis")
-            fd_results = {
-                'dimension': np.nan,
-                'error': np.nan,
-                'r_squared': np.nan
-            }
+            fd_results = self.compute_fractal_dimension(data)
 
         print(f"Fractal dimension: {fd_results['dimension']:.6f} ± {fd_results['error']:.6f} (R²={fd_results['r_squared']:.6f})")
         print(f"Fractal calculation time: {time.time() - fd_start_time:.2f} seconds")
@@ -950,9 +445,7 @@ class RTAnalyzer:
             
             plt.xlabel('X')
             plt.ylabel('Y')
-            # Only add title if not disabled
-            if not self.no_titles:
-                plt.title(f'Rayleigh-Taylor Interface at t = {data["time"]:.3f} ({mixing_method} method)')
+            plt.title(f'Rayleigh-Taylor Interface at t = {data["time"]:.3f} ({mixing_method} method)')
             plt.legend()
             plt.grid(True)
             plt.savefig(os.path.join(file_dir, 'interface_plot.png'), dpi=300)
@@ -980,9 +473,7 @@ class RTAnalyzer:
                 
                 plt.xlabel('Box Size')
                 plt.ylabel('Box Count')
-                # Only add title if not disabled
-                if not self.no_titles:
-                    plt.title(f'Fractal Dimension at t = {data["time"]:.3f}')
+                plt.title(f'Fractal Dimension at t = {data["time"]:.3f}')
                 plt.legend()
                 plt.grid(True)
                 plt.savefig(os.path.join(file_dir, 'fractal_dimension.png'), dpi=300)
@@ -998,9 +489,7 @@ class RTAnalyzer:
             'fractal_dim': fd_results['dimension'],
             'fd_error': fd_results['error'],
             'fd_r_squared': fd_results['r_squared'],
-            'mixing_method': mixing_method,
-            'validity_status': validity_status,
-            'analysis_quality': 'excellent' if validity_status['overall_valid'] and len(validity_status['warnings']) == 0 else 'good' if validity_status['overall_valid'] and len(validity_status['warnings']) <= 2 else 'acceptable' if validity_status['overall_valid'] else 'problematic'
+            'mixing_method': mixing_method
         }
         
         # Add Dalziel-specific results
@@ -1155,9 +644,7 @@ class RTAnalyzer:
         plt.xscale('log', base=2)  # Use log scale with base 2
         plt.xlabel('Grid Resolution')
         plt.ylabel(f'Fractal Dimension at t={target_time}')
-        # Only add title if not disabled
-        if not self.no_titles:
-            plt.title(f'Fractal Dimension Convergence at t={target_time} ({mixing_method} method)')
+        plt.title(f'Fractal Dimension Convergence at t={target_time} ({mixing_method} method)')
         plt.grid(True)
         
         # Add grid points as labels
@@ -1191,9 +678,7 @@ class RTAnalyzer:
         plt.xscale('log', base=2)
         plt.xlabel('Grid Resolution')
         plt.ylabel(f'Mixing Layer Thickness at t={target_time}')
-        # Only add title if not disabled
-        if not self.no_titles:
-            plt.title(f'Mixing Layer Thickness Convergence at t={target_time} ({mixing_method} method)')
+        plt.title(f'Mixing Layer Thickness Convergence at t={target_time} ({mixing_method} method)')
         plt.grid(True)
         plt.legend()
         
@@ -1208,9 +693,7 @@ class RTAnalyzer:
             plt.xscale('log', base=2)
             plt.xlabel('Grid Resolution')
             plt.ylabel('Mixing Fraction')
-            # Only add title if not disabled
-            if not self.no_titles:
-                plt.title(f'Mixing Fraction Convergence at t={target_time} (Dalziel method)')
+            plt.title(f'Mixing Fraction Convergence at t={target_time} (Dalziel method)')
             plt.grid(True)
             plt.tight_layout()
             plt.savefig(os.path.join(output_dir, f"mixing_fraction_convergence.png"), dpi=300)
@@ -1225,9 +708,7 @@ class RTAnalyzer:
         plt.plot(df['time'], df['hb'], 'g--', label='Lower', linewidth=2)
         plt.xlabel('Time')
         plt.ylabel('Mixing Layer Thickness')
-        # Only add title if not disabled
-        if not self.no_titles:
-            plt.title(f'Mixing Layer Evolution ({mixing_method} method)')
+        plt.title(f'Mixing Layer Evolution ({mixing_method} method)')
         plt.legend()
         plt.grid(True)
         plt.savefig(os.path.join(output_dir, f'mixing_evolution_{mixing_method}.png'), dpi=300)
@@ -1243,9 +724,7 @@ class RTAnalyzer:
                        alpha=0.3, color='gray')
         plt.xlabel('Time')
         plt.ylabel('Fractal Dimension')
-        # Only add title if not disabled
-        if not self.no_titles:
-            plt.title(f'Fractal Dimension Evolution ({mixing_method} method)')
+        plt.title(f'Fractal Dimension Evolution ({mixing_method} method)')
         plt.grid(True)
         plt.savefig(os.path.join(output_dir, f'dimension_evolution_{mixing_method}.png'), dpi=300)
         plt.close()
@@ -1255,9 +734,7 @@ class RTAnalyzer:
         plt.plot(df['time'], df['fd_r_squared'], 'm-o', linewidth=2)
         plt.xlabel('Time')
         plt.ylabel('R² Value')
-        # Only add title if not disabled
-        if not self.no_titles:
-            plt.title(f'Fractal Dimension Fit Quality ({mixing_method} method)')
+        plt.title(f'Fractal Dimension Fit Quality ({mixing_method} method)')
         plt.ylim(0, 1)
         plt.grid(True)
         plt.savefig(os.path.join(output_dir, f'r_squared_evolution_{mixing_method}.png'), dpi=300)
@@ -1269,9 +746,7 @@ class RTAnalyzer:
             plt.plot(df['time'], df['mixing_fraction'], 'c-o', linewidth=2)
             plt.xlabel('Time')
             plt.ylabel('Mixing Fraction')
-            # Only add title if not disabled
-            if not self.no_titles:
-                plt.title('Mixing Fraction Evolution (Dalziel method)')
+            plt.title('Mixing Fraction Evolution (Dalziel method)')
             plt.grid(True)
             plt.savefig(os.path.join(output_dir, 'mixing_fraction_evolution.png'), dpi=300)
             plt.close()
@@ -1297,9 +772,7 @@ class RTAnalyzer:
         lines2, labels2 = ax2.get_legend_handles_labels()
         ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
         
-        # Only add title if not disabled
-        if not self.no_titles:
-            plt.title(f'Mixing Layer and Fractal Dimension Evolution ({mixing_method} method)')
+        plt.title(f'Mixing Layer and Fractal Dimension Evolution ({mixing_method} method)')
         plt.grid(True)
         plt.savefig(os.path.join(output_dir, f'combined_evolution_{mixing_method}.png'), dpi=300)
         plt.close()
@@ -1362,6 +835,9 @@ class RTAnalyzer:
         
         print(f"Using {num_box_sizes} box sizes for analysis")
         
+        # Use spatial index from BoxCounter to speed up calculations
+        bc = self.fractal_analyzer.box_counter
+        
         # Add small margin to bounding box
         margin = extent * 0.01
         min_x -= margin
@@ -1375,7 +851,7 @@ class RTAnalyzer:
         
         # Determine grid cell size for spatial index (use smallest box size)
         grid_size = min_box_size * 2
-        segment_grid, grid_width, grid_height = self.fractal_analyzer.create_spatial_index(
+        segment_grid, grid_width, grid_height = bc.create_spatial_index(
             segments, min_x, min_y, max_x, max_y, grid_size)
         
         print(f"Spatial index created in {time.time() - start_time:.2f} seconds")
@@ -1418,7 +894,7 @@ class RTAnalyzer:
                     count = 0
                     for seg_idx in segments_to_check:
                         (x1, y1), (x2, y2) = segments[seg_idx]
-                        if self.fractal_analyzer.liang_barsky_line_box_intersection(
+                        if self.fractal_analyzer.base.liang_barsky_line_box_intersection(
                                 x1, y1, x2, y2, box_xmin, box_ymin, box_xmax, box_ymax):
                             count += 1
                     
@@ -1585,9 +1061,7 @@ class RTAnalyzer:
             
             plt.xlabel('q')
             plt.ylabel('D(q)')
-            # Only add title if not disabled
-            if not self.no_titles:
-                plt.title(f'Generalized Dimensions D(q) at t = {data["time"]:.2f}')
+            plt.title(f'Generalized Dimensions D(q) at t = {data["time"]:.2f}')
             plt.grid(True)
             plt.legend()
             plt.savefig(os.path.join(output_dir, "multifractal_dimensions.png"), dpi=300)
@@ -1610,9 +1084,7 @@ class RTAnalyzer:
             
             plt.xlabel('α')
             plt.ylabel('f(α)')
-            # Only add title if not disabled
-            if not self.no_titles:
-                plt.title(f'Multifractal Spectrum f(α) at t = {data["time"]:.2f}')
+            plt.title(f'Multifractal Spectrum f(α) at t = {data["time"]:.2f}')
             plt.grid(True)
             plt.savefig(os.path.join(output_dir, "multifractal_spectrum.png"), dpi=300)
             plt.close()
@@ -1623,9 +1095,7 @@ class RTAnalyzer:
             plt.plot(q_values[valid], r_squared[valid], 'go-', markersize=4)
             plt.xlabel('q')
             plt.ylabel('R²')
-            # Only add title if not disabled
-            if not self.no_titles:
-                plt.title(f'Fit Quality for Different q Values at t = {data["time"]:.2f}')
+            plt.title(f'Fit Quality for Different q Values at t = {data["time"]:.2f}')
             plt.grid(True)
             plt.savefig(os.path.join(output_dir, "multifractal_r_squared.png"), dpi=300)
             plt.close()
@@ -1747,9 +1217,7 @@ class RTAnalyzer:
             plt.plot(x_values, D2_values, 'go-', label='D(2) - Correlation dimension')
             plt.xlabel(x_label)
             plt.ylabel('Generalized Dimensions')
-            # Only add title if not disabled
-            if not self.no_titles:
-                plt.title(f'Evolution of Generalized Dimensions with {x_label}')
+            plt.title(f'Evolution of Generalized Dimensions with {x_label}')
             plt.grid(True)
             plt.legend()
             plt.savefig(os.path.join(output_dir, "dimensions_evolution.png"), dpi=300)
@@ -1761,9 +1229,7 @@ class RTAnalyzer:
             plt.plot(x_values, degree_mf, 'cd-', label='Degree of multifractality')
             plt.xlabel(x_label)
             plt.ylabel('Parameter Value')
-            # Only add title if not disabled
-            if not self.no_titles:
-                plt.title(f'Evolution of Multifractal Parameters with {x_label}')
+            plt.title(f'Evolution of Multifractal Parameters with {x_label}')
             plt.grid(True)
             plt.legend()
             plt.savefig(os.path.join(output_dir, "multifractal_params_evolution.png"), dpi=300)
@@ -1791,9 +1257,7 @@ class RTAnalyzer:
                 ax.set_xlabel(x_label)
                 ax.set_ylabel('q')
                 ax.set_zlabel('D(q)')
-                # Only add title if not disabled
-                if not self.no_titles:
-                    ax.set_title(f'Evolution of D(q) Spectrum with {x_label}')
+                ax.set_title(f'Evolution of D(q) Spectrum with {x_label}')
                 
                 fig.colorbar(surf, ax=ax, shrink=0.5, aspect=5, label='D(q)')
                 plt.savefig(os.path.join(output_dir, "Dq_evolution_3D.png"), dpi=300)
@@ -1815,171 +1279,3 @@ class RTAnalyzer:
             summary_df.to_csv(os.path.join(output_dir, "multifractal_evolution_summary.csv"), index=False)
         
         return results
-
-
-def main():
-    """Main function to run RT analyzer from command line."""
-    parser = argparse.ArgumentParser(
-        description='Rayleigh-Taylor Simulation Analyzer with Fractal Dimension Calculation',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Analyze a single VTK file
-  python rt_analyzer.py --file RT_0009000.vtk
-
-  # Process a time series with Dalziel mixing method
-  python rt_analyzer.py --pattern "RT_*.vtk" --mixing_method dalziel
-
-  # Analyze resolution convergence
-  python rt_analyzer.py --convergence --files file1.vtk file2.vtk --resolutions 128 256
-
-  # Disable plot titles for journal submission
-  python rt_analyzer.py --file RT_0009000.vtk --no_titles
-
-  # Use grid optimization for fractal dimension calculation
-  python rt_analyzer.py --file RT_0009000.vtk --use_grid_optimization
-""")
-    
-    parser.add_argument('--file', help='Single VTK file to analyze')
-    parser.add_argument('--pattern', help='Pattern for VTK files (e.g., "RT_*.vtk")')
-    parser.add_argument('--files', nargs='+', help='List of VTK files for convergence analysis')
-    parser.add_argument('--resolutions', nargs='+', type=int, 
-                       help='Grid resolutions corresponding to files (for convergence analysis)')
-    parser.add_argument('--output_dir', default='./rt_analysis', 
-                       help='Output directory for results (default: ./rt_analysis)')
-    parser.add_argument('--mixing_method', choices=['geometric', 'statistical', 'dalziel'], 
-                       default='dalziel', help='Method for computing mixing thickness')
-    parser.add_argument('--h0', type=float, help='Initial interface position (auto-detected if not provided)')
-    parser.add_argument('--min_box_size', type=float, 
-                       help='Minimum box size for fractal analysis (auto-estimated if not provided)')
-    parser.add_argument('--target_time', type=float, default=9.0,
-                       help='Target time for convergence analysis (default: 9.0)')
-    parser.add_argument('--convergence', action='store_true',
-                       help='Perform resolution convergence analysis')
-    parser.add_argument('--use_grid_optimization', action='store_true',
-                       help='Use grid optimization for fractal dimension calculation')
-    parser.add_argument('--no_titles', action='store_true',
-                       help='Disable plot titles for journal submissions')
-    parser.add_argument('--multifractal', action='store_true',
-                       help='Perform multifractal analysis')
-    parser.add_argument('--q_values', nargs='+', type=float,
-                       help='Q values for multifractal analysis (default: -5 to 5 in 0.5 steps)')
-    
-    args = parser.parse_args()
-    
-    # Validate arguments
-    if not any([args.file, args.pattern, args.convergence]):
-        print("Error: Must specify --file, --pattern, or --convergence")
-        parser.print_help()
-        return
-    
-    if args.convergence and not (args.files and args.resolutions):
-        print("Error: --convergence requires --files and --resolutions")
-        parser.print_help()
-        return
-    
-    if args.convergence and len(args.files) != len(args.resolutions):
-        print("Error: Number of files must match number of resolutions")
-        return
-    
-    # Create analyzer instance
-    analyzer = RTAnalyzer(
-        output_dir=args.output_dir,
-        use_grid_optimization=args.use_grid_optimization,
-        no_titles=args.no_titles  # Pass the no_titles flag
-    )
-    
-    print(f"RT Analyzer initialized")
-    print(f"Output directory: {args.output_dir}")
-    print(f"Mixing method: {args.mixing_method}")
-    print(f"Grid optimization: {'ENABLED' if args.use_grid_optimization else 'DISABLED'}")
-    print(f"Plot titles: {'DISABLED' if args.no_titles else 'ENABLED'}")
-    
-    try:
-        if args.file:
-            # Analyze single file
-            print(f"\nAnalyzing single file: {args.file}")
-            result = analyzer.analyze_vtk_file(
-                args.file, 
-                mixing_method=args.mixing_method,
-                h0=args.h0,
-                min_box_size=args.min_box_size
-            )
-            
-            print(f"\nResults for {args.file}:")
-            print(f"  Time: {result['time']:.6f}")
-            print(f"  Mixing thickness: {result['h_total']:.6f}")
-            print(f"  Fractal dimension: {result['fractal_dim']:.6f} ± {result['fd_error']:.6f}")
-            print(f"  R²: {result['fd_r_squared']:.6f}")
-            
-            # Multifractal analysis if requested
-            if args.multifractal:
-                print(f"\nPerforming multifractal analysis...")
-                data = analyzer.read_vtk_file(args.file)
-                q_values = args.q_values if args.q_values else None
-                
-                output_dir = os.path.join(args.output_dir, "multifractal")
-                mf_results = analyzer.compute_multifractal_spectrum(
-                    data, 
-                    min_box_size=args.min_box_size or 0.001,
-                    q_values=q_values,
-                    output_dir=output_dir
-                )
-                
-                if mf_results:
-                    print(f"Multifractal analysis complete. Results saved to {output_dir}")
-        
-        elif args.pattern:
-            # Process time series
-            print(f"\nProcessing time series with pattern: {args.pattern}")
-            df = analyzer.process_vtk_series(
-                args.pattern,
-                mixing_method=args.mixing_method
-            )
-            
-            if df is not None:
-                print(f"\nTime series analysis complete:")
-                print(f"  Processed {len(df)} files")
-                print(f"  Time range: {df['time'].min():.3f} to {df['time'].max():.3f}")
-                print(f"  Final mixing thickness: {df['h_total'].iloc[-1]:.6f}")
-                print(f"  Final fractal dimension: {df['fractal_dim'].iloc[-1]:.6f}")
-        
-        elif args.convergence:
-            # Resolution convergence analysis
-            print(f"\nPerforming resolution convergence analysis")
-            print(f"Files: {args.files}")
-            print(f"Resolutions: {args.resolutions}")
-            print(f"Target time: {args.target_time}")
-            
-            df = analyzer.analyze_resolution_convergence(
-                args.files,
-                args.resolutions,
-                target_time=args.target_time,
-                mixing_method=args.mixing_method
-            )
-            
-            if df is not None:
-                print(f"\nConvergence analysis complete:")
-                print(f"  Analyzed {len(df)} resolutions")
-                print(f"  Resolution range: {min(args.resolutions)} to {max(args.resolutions)}")
-                
-                # Show convergence trends
-                if len(df) >= 2:
-                    fd_change = df['fractal_dim'].iloc[-1] - df['fractal_dim'].iloc[-2]
-                    mixing_change = df['h_total'].iloc[-1] - df['h_total'].iloc[-2]
-                    print(f"  Last fractal dimension change: {fd_change:.6f}")
-                    print(f"  Last mixing thickness change: {mixing_change:.6f}")
-    
-    except Exception as e:
-        print(f"Error during analysis: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return 1
-    
-    print(f"\nAnalysis complete. Results saved to: {args.output_dir}")
-    return 0
-
-
-if __name__ == "__main__":
-
-    exit(main())

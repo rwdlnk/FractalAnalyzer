@@ -77,7 +77,7 @@ def analyze_temporal_evolution(output_dir, resolutions, base_pattern=None, speci
     
     # Process each resolution
     for resolution in resolutions:
-        print(f"\n=== Analyzing temporal evolution for {resolution}x{resolution} resolution ===\n")
+        print(f"\n\n\n=== Analyzing temporal evolution for {resolution}x{resolution} resolution ===\n")
         
         # Create analyzer instance for this resolution
         res_dir = os.path.join(output_dir, f'res_{resolution}')
@@ -145,7 +145,7 @@ def analyze_temporal_evolution(output_dir, resolutions, base_pattern=None, speci
         
         # Process each file
         for i, (actual_time, vtk_file) in enumerate(file_time_pairs):
-            print(f"Processing file {i+1}/{len(file_time_pairs)}: {os.path.basename(vtk_file)} (t={actual_time:.3f})")
+            print(f"\n\nProcessing file {i+1}/{len(file_time_pairs)}: {os.path.basename(vtk_file)} (t={actual_time:.3f})")
 
             try:
                 # Use the complete analysis method instead of separate calls
@@ -407,6 +407,15 @@ def main():
                       help='Pattern for VTK files with {resolution} placeholder')
     parser.add_argument('--times', type=float, nargs='*',
                       help='Specific time points to analyze (optional)')
+    
+    # New time range options
+    parser.add_argument('--time-start', type=float, default=0.0,
+                      help='Start time for automatic time sequence (default: 0.0)')
+    parser.add_argument('--time-end', type=float, default=None,
+                      help='End time for automatic time sequence (required with --time-step)')
+    parser.add_argument('--time-step', type=float, default=None,
+                      help='Time step for automatic time sequence (e.g., 0.1)')
+    
     parser.add_argument('--auto-times', action='store_true',
                       help='Auto-detect reasonable time range for analysis')
     parser.add_argument('--time-tolerance', type=float, default=0.5,
@@ -422,7 +431,20 @@ def main():
                       help='Minimum box size for fractal analysis (default: auto)')
     parser.add_argument('--no-titles', action='store_true',
                       help='Disable plot titles for journal submissions')
+    
     args = parser.parse_args()
+    
+    # Generate time sequence if time-step is specified
+    if args.time_step is not None:
+        if args.time_end is None:
+            parser.error("--time-end is required when using --time-step")
+        if args.times is not None:
+            parser.error("Cannot use both --times and --time-step")
+        
+        # Generate time sequence using numpy arange
+        args.times = np.arange(args.time_start, args.time_end + args.time_step/2, args.time_step).tolist()
+        print(f"Generated time sequence: {len(args.times)} points from {args.time_start} to {args.time_end} with step {args.time_step}")
+        print(f"Times: {args.times[:10]}{'...' if len(args.times) > 10 else ''}")
     
     # Convert disable flag to use flag
     use_grid_optimization = not args.disable_grid_optimization
@@ -437,8 +459,8 @@ def main():
         args.auto_times,
         args.mixing_method,
         args.h0,
-		use_grid_optimization,
-		args.min_box_size,
+        use_grid_optimization,
+        args.min_box_size,
         args.no_titles
     )
     
