@@ -17,19 +17,22 @@ with open(os.path.join(here, "requirements.txt"), "r", encoding="utf-8") as fh:
 
 setup(
     name="fractal-analyzer",
-    version="1.0.0",
-    author="Rod Douglass",  # Replace with your actual name
-    author_email="rwdlanm@gmail.com",  # Replace with your email
-    description="Advanced fractal dimension analysis for fluid interfaces and mathematical fractals",
+    version="2.1.0",  # UPDATED: Increment version for CONREC + parallel features
+    author="Rod Douglass",
+    author_email="rwdlanm@gmail.com",
+    description="Advanced fractal dimension analysis for fluid interfaces with CONREC precision extraction and parallel processing",  # UPDATED
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/rwdlnk/Fractal_Analyzer",  # Replace with your GitHub URL
+    url="https://github.com/rwdlnk/Fractal_Analyzer",
     project_urls={
         "Bug Tracker": "https://github.com/rwdlnk/Fractal_Analyzer/issues",
         "Documentation": "https://github.com/rwdlnk/Fractal_Analyzer/wiki",
         "Source Code": "https://github.com/rwdlnk/Fractal_Analyzer",
     },
-    packages=find_packages(exclude=["tests", "tests.*", "docs", "docs.*"]),
+    
+    # UPDATED: Include scripts directory packages
+    packages=find_packages(exclude=["tests", "tests.*", "docs", "docs.*"]) + ['scripts', 'scripts.optimized'],
+    
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Science/Research",
@@ -45,10 +48,12 @@ setup(
         "Topic :: Scientific/Engineering :: Mathematics",
         "Topic :: Scientific/Engineering :: Visualization",
         "Topic :: Software Development :: Libraries :: Python Modules",
+        "Environment :: Console",  # NEW: Added for command-line tools
     ],
     keywords=[
         "fractal", "dimension", "box-counting", "rayleigh-taylor", 
-        "mixing", "cfd", "interface", "multifractal", "physics", "simulation"
+        "mixing", "cfd", "interface", "multifractal", "physics", "simulation",
+        "conrec", "contouring", "parallel-processing", "temporal-evolution"  # NEW: CONREC + parallel keywords
     ],
     python_requires=">=3.8",
     install_requires=requirements,
@@ -72,6 +77,9 @@ setup(
             "notebook>=6.0",
             "ipywidgets>=7.6",
         ],
+        "parallel": [  # NEW: Parallel processing extras
+            "psutil>=5.8.0",
+        ],
         "all": [
             # Development tools
             "pytest>=6.0", "pytest-cov>=2.10", "black>=21.0", "flake8>=3.8", "mypy>=0.900",
@@ -79,13 +87,26 @@ setup(
             "sphinx>=4.0", "sphinx-rtd-theme>=1.0", "myst-parser>=0.15",
             # Jupyter
             "jupyter>=1.0", "notebook>=6.0", "ipywidgets>=7.6",
+            # Parallel processing  # NEW
+            "psutil>=5.8.0",
         ],
     },
     entry_points={
         "console_scripts": [
+            # Core analysis tools
             "fractal-analyze=fractal_analyzer.core.fractal_analyzer:main",
-            "rt-analyze=scripts.analyze_temporal_improved:main",
-            "rt-convergence=scripts.basic_resolution_convergence:main",
+            "rt-analyze=fractal_analyzer.core.rt_analyzer:main",  # UPDATED: Now supports CONREC
+
+            "rt-convergence=scripts.basic_resolution_convergence:main",  # Keep existing
+            "rt-temporal=scripts.analyze_temporal_improved:main",  # Your existing script
+        
+            # NEW: Add serial analysis scripts
+            "temporal-evolution=fractal_analyzer.optimized.temporal_evolution_analyzer:main",
+            "resolution-comparison=fractal_analyzer.optimized.resolution_comparison:main",
+        
+            # NEW: Add parallel analysis scripts (these were missing!)
+            "parallel-temporal=fractal_analyzer.optimized.parallel_temporal_evolution_analyzer:main",
+            "parallel-resolution=fractal_analyzer.optimized.parallel_resolution_comparison:main",
         ],
     },
     include_package_data=True,
@@ -95,6 +116,10 @@ setup(
             "examples/data/*.vtk", 
             "tests/test_data/*.txt",
             "tests/test_data/*.vtk",
+        ],
+        "scripts": [  # NEW: Include scripts in package data
+            "*.py",
+            "optimized/*.py",
         ],
     },
     zip_safe=False,  # For numba compatibility

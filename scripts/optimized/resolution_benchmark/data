@@ -1,0 +1,10 @@
+ FIXED BENCHMARK SUMMARY
+============================================================
+Optimized results:
+   200×200 : D = 1.0041 ± 0.0262, Time = 23.18s
+   400×400 : D = 0.9564 ± 0.0103, Time = 37.19s
+
+Baseline comparison:
+  Total optimized time: 60.37s
+  Total baseline time: 60.15s
+  Overall speedup: 1.00×

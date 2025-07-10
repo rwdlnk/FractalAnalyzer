@@ -39,7 +39,6 @@ class FractalAnalyzer:
         # Configure matplotlib for EPS output if requested
         if self.eps_plots:
             self._configure_matplotlib_for_eps()
-    
     def _configure_matplotlib_for_eps(self):
         """Configure matplotlib for high-quality EPS output meeting AMC requirements."""
         import matplotlib
@@ -47,31 +46,58 @@ class FractalAnalyzer:
         # Set backend that supports EPS
         matplotlib.use('Agg')
         
-        # Configure for publication-quality EPS
+        # Enhanced configuration for publication-quality EPS with better readability
         plt.rcParams.update({
-            'font.size': 12,
+            # FONT SETTINGS - Increased sizes for better readability
+            'font.size': 14,              # Increased from 12
             'font.family': 'serif',
             'font.serif': ['Times New Roman', 'Liberation Serif', 'DejaVu Serif', 'Times'],
-            'text.usetex': False,  # Set to True if LaTeX is available
-            'axes.linewidth': 1.0,
-            'axes.labelsize': 12,
-            'axes.titlesize': 14,
-            'xtick.labelsize': 10,
-            'ytick.labelsize': 10,
-            'legend.fontsize': 10,
-            'figure.figsize': [8, 6],  # AMC recommended size
-            'figure.dpi': 300,  # High DPI for quality
+            'text.usetex': False,
+            
+            # AXES AND LABELS - Larger for better visibility
+            'axes.linewidth': 1.2,        # Slightly thicker
+            'axes.labelsize': 16,         # Increased from 12
+            'axes.titlesize': 18,         # Increased from 14
+            'axes.labelweight': 'bold',   # Bold labels for better visibility
+            
+            # TICK LABELS - Larger and bolder
+            'xtick.labelsize': 14,        # Increased from 10
+            'ytick.labelsize': 14,        # Increased from 10
+            'xtick.major.width': 1.2,
+            'ytick.major.width': 1.2,
+            'xtick.minor.width': 0.8,
+            'ytick.minor.width': 0.8,
+            
+            # LEGEND - More readable
+            'legend.fontsize': 12,        # Increased from 10
+            'legend.frameon': True,
+            'legend.fancybox': True,
+            'legend.shadow': True,
+            'legend.framealpha': 0.9,
+            
+            # FIGURE SETTINGS - Optimized for AMC
+            'figure.figsize': [12, 10],   # Larger default size for better readability
+            'figure.dpi': 300,
             'savefig.dpi': 300,
             'savefig.format': 'eps',
             'savefig.bbox': 'tight',
-            'savefig.pad_inches': 0.1,
-            'lines.linewidth': 1.5,
-            'lines.markersize': 6,
-            'grid.linewidth': 0.5,
-            'grid.alpha': 0.7
+            'savefig.pad_inches': 0.2,    # Slightly more padding
+            
+            # LINES AND MARKERS - More visible
+            'lines.linewidth': 2.0,       # Increased from 1.5
+            'lines.markersize': 8,        # Increased from 6
+            'lines.markeredgewidth': 1.0,
+            
+            # GRID - Subtle but visible
+            'grid.linewidth': 0.8,        # Slightly thicker
+            'grid.alpha': 0.6,            # Less transparent
+            
+            # MATH TEXT - Better rendering
+            'mathtext.fontset': 'stix',
+            'mathtext.default': 'regular'
         })
         
-        print("Configured matplotlib for publication-quality EPS output")
+        print("Configured matplotlib for publication-quality EPS output with enhanced readability")
     
     def _get_plot_extension(self):
         """Get the appropriate file extension for plots."""
@@ -1521,9 +1547,9 @@ class FractalAnalyzer:
 
 # ================ Plotting Functions ================
     def plot_results_separate(self, segments, box_sizes, box_counts, fractal_dimension,
-                            error, bounding_box, intercept=None, plot_boxes=False, level=None,
-                            custom_filename=None):
-        """Creates two separate plots instead of a combined figure."""
+                                error, bounding_box, intercept=None, plot_boxes=False, level=None,
+                                custom_filename=None):
+        """Creates plots with enhanced readability for publication."""
         import matplotlib
 
         # Get segment count
@@ -1532,101 +1558,53 @@ class FractalAnalyzer:
         # Determine if this is a file-based curve with unknown fractal type
         is_file_based = self.fractal_type is None or (custom_filename and not level)
 
-        # Set parameters based on fractal type, level, and segment count
+        # Enhanced figure size for better readability
+        fig_size = (12, 10)  # Larger base size for all plots
+        plot_dpi = self._get_plot_dpi()
+
+        # Set parameters based on complexity
         if is_file_based:
-            # Optimization for file-based curves based on segment count
             if segment_count > 50000:
-                # Very large file-based dataset
                 matplotlib.rcParams['agg.path.chunksize'] = 100000
-                plot_dpi = 150 if not self.eps_plots else 300
-                fig_size = (14, 12)
                 use_rasterized = True
-                print(f"Very large file-based curve detected ({segment_count} segments). Using maximum optimization.")
+                print(f"Very large file-based curve detected ({segment_count} segments). Using optimization.")
             elif segment_count > 20000:
-                # Large file-based dataset
                 matplotlib.rcParams['agg.path.chunksize'] = 50000
-                plot_dpi = 200 if not self.eps_plots else 300
-                fig_size = (12, 10)
                 use_rasterized = True
-                print(f"Large file-based curve detected ({segment_count} segments). Using enhanced optimization.")
-            elif segment_count > 5000:
-                # Medium file-based dataset
-                matplotlib.rcParams['agg.path.chunksize'] = 25000
-                plot_dpi = 250 if not self.eps_plots else 300
-                fig_size = (11, 9)
-                use_rasterized = True
-                print(f"Medium file-based curve detected ({segment_count} segments). Using standard optimization.")
+                print(f"Large file-based curve detected ({segment_count} segments). Using optimization.")
             else:
-                # Small file-based dataset - default settings
-                matplotlib.rcParams['agg.path.chunksize'] = 20000
-                plot_dpi = self._get_plot_dpi()
-                fig_size = (10, 8)
+                matplotlib.rcParams['agg.path.chunksize'] = 25000
                 use_rasterized = False
-        elif self.fractal_type == 'koch' and level and level > 5:
-            # Special settings for high-level Koch curves
-            matplotlib.rcParams['agg.path.chunksize'] = 50000
-            plot_dpi = 200 if not self.eps_plots else 300
-            fig_size = (12, 10)
-            use_rasterized = True
-        elif self.fractal_type in ['sierpinski', 'hilbert'] and level and level > 6:
-            # Settings for other complex fractals
-            matplotlib.rcParams['agg.path.chunksize'] = 30000
-            plot_dpi = 250 if not self.eps_plots else 300
-            fig_size = (11, 9)
-            use_rasterized = True
         else:
-            # Default settings for less complex curves
-            matplotlib.rcParams['agg.path.chunksize'] = 20000
-            plot_dpi = self._get_plot_dpi()
-            fig_size = (10, 8)
-            use_rasterized = False
+            matplotlib.rcParams['agg.path.chunksize'] = 50000
+            use_rasterized = segment_count > 20000
 
-        matplotlib.rcParams['path.simplify_threshold'] = 0.1  # Add simplification
+        matplotlib.rcParams['path.simplify_threshold'] = 0.1
 
-        # Figure 1: The curve with optional box overlay
         plt.figure(figsize=fig_size)
 
         start_time = time.time()
         print("Plotting curve segments...")
 
-        # Convert segments to a more efficient format for line plotting
-        # For large datasets, use a simplified plotting method
+        # Enhanced plotting with better line visibility
         if segment_count > 50000:
-            print(f"Very large dataset ({segment_count} segments), using aggressive sampling...")
-            # More aggressive sampling for extremely large datasets
-            step = max(1, segment_count // 10000)
+            print(f"Very large dataset ({segment_count} segments), using sampling...")
+            step = max(1, segment_count // 15000)
             sampled_segments = segments[::step]
             print(f"Sampled down to {len(sampled_segments)} segments for visualization")
 
             x_points = []
             y_points = []
             for (x1, y1), (x2, y2) in sampled_segments:
-                x_points.extend([x1, x2, None])  # None creates a break in the line
+                x_points.extend([x1, x2, None])
                 y_points.extend([y1, y2, None])
 
             x_points = x_points[:-1]
             y_points = y_points[:-1]
 
-            plt.plot(x_points, y_points, 'k-', linewidth=1, rasterized=use_rasterized)
-        elif segment_count > 10000:
-            print(f"Large dataset ({segment_count} segments), using simplified plotting...")
-            # Sample the segments for visualization
-            step = max(1, segment_count // 20000)
-            sampled_segments = segments[::step]
-            print(f"Sampled down to {len(sampled_segments)} segments for visualization")
-
-            x_points = []
-            y_points = []
-            for (x1, y1), (x2, y2) in sampled_segments:
-                x_points.extend([x1, x2, None])  # None creates a break in the line
-                y_points.extend([y1, y2, None])
-
-            x_points = x_points[:-1]
-            y_points = y_points[:-1]
-
-            plt.plot(x_points, y_points, 'k-', linewidth=1, rasterized=use_rasterized)
+            plt.plot(x_points, y_points, 'k-', linewidth=1.8, rasterized=use_rasterized)
         else:
-            # Normal plotting for smaller datasets
+            # Normal plotting with enhanced line width
             x_points = []
             y_points = []
             for (x1, y1), (x2, y2) in segments:
@@ -1636,9 +1614,14 @@ class FractalAnalyzer:
             x_points = x_points[:-1]
             y_points = y_points[:-1]
 
-            plt.plot(x_points, y_points, 'k-', linewidth=1, rasterized=use_rasterized)
+            plt.plot(x_points, y_points, 'k-', linewidth=1.8, rasterized=use_rasterized)
 
         print(f"Curve plotting completed in {time.time() - start_time:.2f} seconds")
+
+        # Enhanced axis formatting
+        ax = plt.gca()
+        for spine in ax.spines.values():
+            spine.set_linewidth(1.5)
 
         # Unpack the bounding box used in counting
         min_x, min_y, max_x, max_y = bounding_box
@@ -1650,9 +1633,9 @@ class FractalAnalyzer:
 
         # If requested, plot boxes at a specific scale
         if plot_boxes:
-            self._plot_box_overlay(segments, box_sizes, box_counts, bounding_box)
+            self._plot_box_overlay_enhanced(segments, box_sizes, box_counts, bounding_box)
 
-        # Only add title if not disabled
+        # Enhanced titles and labels
         if not self.no_titles:
             title = f'{self.fractal_type.capitalize() if self.fractal_type else "Fractal"} Curve'
             if level is not None:
@@ -1661,11 +1644,15 @@ class FractalAnalyzer:
                 smallest_idx = len(box_sizes) - 1
                 box_size = box_sizes[smallest_idx]
                 title += f'\nwith Box Counting Overlay (Box Size: {box_size:.6f})'
-            plt.title(title)
+            plt.title(title, fontsize=18, fontweight='bold', pad=15)
 
-        plt.xlabel('X')
-        plt.ylabel('Y')
-        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.xlabel('X', fontsize=16, fontweight='bold', labelpad=10)
+        plt.ylabel('Y', fontsize=16, fontweight='bold', labelpad=10)
+        plt.grid(True, linestyle='--', alpha=0.6, linewidth=0.8)
+
+        # Enhanced tick formatting
+        plt.tick_params(axis='both', which='major', labelsize=14, width=1.2, length=6)
+        plt.tick_params(axis='both', which='minor', width=0.8, length=4)
 
         # Use the provided custom_filename if available, otherwise create default filename
         if custom_filename:
@@ -1679,21 +1666,18 @@ class FractalAnalyzer:
 
         # Add memory cleanup before saving large plots
         if segment_count > 20000:
-            # Force garbage collection before saving large plots
             import gc
             gc.collect()
 
         try:
-            print(f"Saving curve plot to {curve_filename}{self._get_plot_extension()} with DPI {plot_dpi}")
+            print(f"Saving enhanced plot to {curve_filename}{self._get_plot_extension()} with DPI {plot_dpi}")
             self._save_plot(curve_filename, plot_dpi)
             print(f"Successfully saved plot to {curve_filename}{self._get_plot_extension()}")
         except Exception as e:
             print(f"Error saving {curve_filename}: {str(e)}")
-            # Try a more aggressive fallback with figure simplification
             try:
                 print("Attempting with simplified figure...")
-                # Further reduce complexity for the save operation
-                plt.clf()  # Clear the figure
+                plt.clf()
                 plt.plot([0, 1], [0, 1], 'k-', linewidth=1)
                 if not self.no_titles:
                     plt.title(f"Simplified version - See log for details")
@@ -1703,7 +1687,6 @@ class FractalAnalyzer:
                 print(f"Saved simplified placeholder to {curve_filename}{self._get_plot_extension()}")
             except Exception as e2:
                 print(f"Still failed to save: {str(e2)}")
-                print("Consider using --no_plot option for very large datasets")
 
         plt.close()
 
@@ -1774,50 +1757,108 @@ class FractalAnalyzer:
         print(f"Box rendering completed in {time.time() - box_time:.2f} seconds")
         print(f"Total boxes drawn: {len(rectangles)}")
 
+    def _plot_box_overlay_enhanced(self, segments, box_sizes, box_counts, bounding_box):
+        """Enhanced box overlay with better visibility."""
+        box_time = time.time()
+        print("Generating enhanced box overlay...")
+
+        # Choose the smallest box size to visualize
+        smallest_idx = len(box_sizes) - 1
+        box_size = box_sizes[smallest_idx]
+        expected_count = box_counts[smallest_idx]
+
+        print(f"Box size: {box_size}, Expected count: {expected_count}")
+
+        min_x, min_y, max_x, max_y = bounding_box
+
+        # Calculate box coordinates
+        num_boxes_x = int(np.ceil((max_x - min_x) / box_size))
+        num_boxes_y = int(np.ceil((max_y - min_y) / box_size))
+
+        # Create spatial index for efficient intersection tests
+        grid_size = box_size * 2
+        segment_grid, _, _ = self.create_spatial_index(
+            segments, min_x, min_y, max_x, max_y, grid_size)
+
+        print(f"Spatial index created in {time.time() - box_time:.2f} seconds")
+        box_time = time.time()
+
+        # Collect all boxes in a list for batch processing
+        rectangles = []
+
+        for i in range(num_boxes_x):
+            for j in range(num_boxes_y):
+                box_xmin = min_x + i * box_size
+                box_ymin = min_y + j * box_size
+                box_xmax = box_xmin + box_size
+                box_ymax = box_ymin + box_size
+
+                # Find which grid cell this box belongs to
+                cell_x = int((box_xmin - min_x) / grid_size)
+                cell_y = int((box_ymin - min_y) / grid_size)
+
+                # Get segments that might intersect this box
+                segments_to_check = set()
+                for dx in [-1, 0, 1]:
+                    for dy in [-1, 0, 1]:
+                        adjacent_key = (cell_x + dx, cell_y + dy)
+                        segments_to_check.update(segment_grid.get(adjacent_key, []))
+
+                # Check for intersection with the candidate segments
+                for seg_idx in segments_to_check:
+                    (x1, y1), (x2, y2) = segments[seg_idx]
+                    if self.liang_barsky_line_box_intersection(x1, y1, x2, y2, box_xmin, box_ymin, box_xmax, box_ymax):
+                        rectangles.append(Rectangle((box_xmin, box_ymin), box_size, box_size))
+                        break
+
+        print(f"Box intersection tests completed in {time.time() - box_time:.2f} seconds")
+        box_time = time.time()
+
+        # Enhanced box visualization with thicker, more visible edges
+        pc = PatchCollection(rectangles, facecolor='none', edgecolor='red', 
+                           linewidth=1.2, alpha=0.9)  # Thicker lines, more opaque
+        plt.gca().add_collection(pc)
+
+        print(f"Enhanced box rendering completed in {time.time() - box_time:.2f} seconds")
+        print(f"Total boxes drawn: {len(rectangles)} with improved visibility")
+
     def _plot_loglog(self, box_sizes, box_counts, fractal_dimension, error, intercept=None,
                     custom_filename=None):
-        """Plot ln-ln analysis with CONSISTENT regression line."""
-        plt.figure(figsize=(10, 8))
+        """Plot ln-ln analysis with CONSISTENT regression line and enhanced readability."""
+        plt.figure(figsize=(12, 9))  # Larger figure size
 
-        plt.loglog(box_sizes, box_counts, 'bo-', label='Data points')
+        # Use larger markers and thicker lines
+        plt.loglog(box_sizes, box_counts, 'bo-', markersize=10, linewidth=2.5, 
+                   label='Data points', markerfacecolor='blue', markeredgecolor='darkblue', markeredgewidth=1)
 
         # CRITICAL FIX: Always perform regression on the SAME data that will be plotted
         log_sizes = np.log(box_sizes)
         log_counts = np.log(box_counts)
 
         if intercept is None:
-            # Calculate slope and intercept from the SAME dataset
             slope, intercept, r_value, _, std_err = stats.linregress(log_sizes, log_counts)
             calculated_dimension = -slope
-
-            # WARNING: Check if this dimension matches the passed dimension
             if abs(calculated_dimension - fractal_dimension) > 0.001:
                 print(f"WARNING: Dimension mismatch in plot!")
                 print(f"  Passed dimension: {fractal_dimension:.6f}")
                 print(f"  Full-data dimension: {calculated_dimension:.6f}")
                 print(f"  Difference: {abs(calculated_dimension - fractal_dimension):.6f}")
-                print(f"  This suggests the optimal window was different from full dataset")
-
-                # Use the consistent slope and intercept from full data
                 fractal_dimension = calculated_dimension
                 error = std_err
         else:
-            # Use provided intercept with provided dimension
             slope = -fractal_dimension
 
-        # Plot the CONSISTENT linear regression line
+        # Plot the CONSISTENT linear regression line with thicker line
         fit_counts = np.exp(intercept + slope * log_sizes)
-        plt.loglog(box_sizes, fit_counts, 'r-', linewidth=2,
+        plt.loglog(box_sizes, fit_counts, 'r-', linewidth=3.5,
                    label=f'Fit: D = {fractal_dimension:.4f} ± {error:.4f}')
 
-        # Custom formatter for scientific notation
+        # Enhanced scientific formatter
         def scientific_formatter(x, pos):
             if x == 0:
                 return '0'
-
             exponent = int(np.log10(x))
             coef = x / 10**exponent
-
             if abs(coef - 1.0) < 0.01:
                 return r'$10^{%d}$' % exponent
             elif abs(coef - 3.0) < 0.01:
@@ -1825,30 +1866,43 @@ class FractalAnalyzer:
             else:
                 return r'${%.1f}{\times}10^{%d}$' % (coef, exponent)
 
-        # Set axis properties
+        # Set axis properties with enhanced formatting
         ax = plt.gca()
         ax.xaxis.set_major_formatter(FuncFormatter(scientific_formatter))
         ax.yaxis.set_major_formatter(FuncFormatter(scientific_formatter))
+        
+        # Thicker axis lines
+        for spine in ax.spines.values():
+            spine.set_linewidth(1.5)
 
         if not self.no_titles:
-            plt.title('Box Counting: ln(N) vs ln(1/r)')
-        plt.xlabel('Box Size (r)')
-        plt.ylabel('Number of Boxes (N)')
-        plt.legend()
-        plt.grid(True, which='major', linestyle='-', linewidth=0.5, alpha=0.7)
-        plt.grid(True, which='minor', linestyle=':', linewidth=0.3, alpha=0.5)
+            plt.title('Box Counting: ln(N) vs ln(1/r)', fontsize=20, fontweight='bold', pad=20)
+        
+        plt.xlabel('Box Size (r)', fontsize=18, fontweight='bold', labelpad=10)
+        plt.ylabel('Number of Boxes (N)', fontsize=18, fontweight='bold', labelpad=10)
+        
+        # Enhanced legend
+        plt.legend(fontsize=14, loc='best', frameon=True, fancybox=True, shadow=True)
+        
+        # Enhanced grid
+        plt.grid(True, which='major', linestyle='-', linewidth=1.0, alpha=0.7)
+        plt.grid(True, which='minor', linestyle=':', linewidth=0.5, alpha=0.5)
+
+        # Enhanced tick formatting
+        plt.tick_params(axis='both', which='major', labelsize=14, width=1.2, length=6)
+        plt.tick_params(axis='both', which='minor', width=0.8, length=4)
 
         # Use provided filename or generate default
         if custom_filename:
             filename = custom_filename
         else:
-            # Use fractal type in filename if available
             filename = 'box_counting_loglog'
             if self.fractal_type:
                 filename = f'{self.fractal_type}_box_counting_loglog'
 
         self._save_plot(filename)
         plt.close()
+
 
     def _plot_linear_region_analysis(self, windows, dimensions, errors, r_squared,
                                    optimal_window, optimal_dimension, theoretical_dimension,
@@ -2073,6 +2127,475 @@ class FractalAnalyzer:
         plt.close()
         print(f"Saved log-log plot with optimal region to {filename}{self._get_plot_extension()}")
 
+    # Enhanced Fractal Analyzer with Rectangular Grid Support
+    # This is a patch/enhancement to add rectangular grid capabilities
+
+    # Add these methods to the FractalAnalyzer class:
+
+    def auto_detect_resolution_from_filename_enhanced(self, filename):
+        """
+        Enhanced resolution detection supporting both square and rectangular grids.
+    
+        Args:
+            filename: Path to the file
+        
+        Returns:
+            tuple: (nx, ny) for grid dimensions, or (None, None) if not found
+        """
+        import re
+        import os
+    
+        basename = os.path.basename(filename)
+    
+        # Pattern for rectangular RT###x###-*.vtk files
+        rect_patterns = [
+            r'RT(\d+)x(\d+)',      # RT160x200-1234.vtk
+            r'(\d+)x(\d+)',        # 160x200-1234.vtk
+            r'RT(\d+)_(\d+)',      # RT160_200-1234.vtk
+        ]
+    
+        # Try rectangular patterns first
+        for pattern in rect_patterns:
+            match = re.search(pattern, basename)
+            if match:
+                nx = int(match.group(1))
+                ny = int(match.group(2))
+                print(f"Auto-detected grid resolution: {nx}×{ny}")
+                return nx, ny
+    
+        # Pattern for square RT###-*.vtk files (backward compatibility)
+        square_pattern = r'RT(\d+)-'
+        match = re.search(square_pattern, basename)
+        if match:
+            n = int(match.group(1))
+            print(f"Auto-detected square resolution: {n}×{n}")
+            return n, n
+    
+        # Try to extract from directory path as fallback
+        dir_patterns = [r'(\d+)x(\d+)', r'(\d+)_(\d+)']
+        for pattern in dir_patterns:
+            dir_match = re.search(pattern, filename)
+            if dir_match:
+                nx = int(dir_match.group(1))
+                ny = int(dir_match.group(2))
+                print(f"Auto-detected resolution from path: {nx}×{ny}")
+                return nx, ny
+    
+        print("Could not auto-detect resolution from filename")
+        return None, None
+
+    def estimate_min_box_size_physics_based_enhanced(self, segments, resolution=None, nx=None, ny=None, 
+                                                   domain_size=1.0, safety_factor=4, fallback_percentile=10):
+        """
+        Enhanced physics-based minimum box size estimation supporting rectangular grids.
+    
+        Args:
+            segments: List of line segments ((x1,y1), (x2,y2))
+            resolution: Grid resolution if square (e.g., 800 for 800x800 simulation)
+            nx, ny: Grid dimensions for rectangular grids (e.g., nx=160, ny=200)
+            domain_size: Physical domain size (default: 1.0)
+            safety_factor: Multiple of grid spacing for resolution-based sizing (default: 4)
+            fallback_percentile: Percentile for statistical fallback (default: 10)
+        
+        Returns:
+            float: Physics-based minimum box size
+        """
+        print("=== ENHANCED PHYSICS-BASED BOX SIZE ESTIMATION (RECTANGULAR GRID SUPPORT) ===")
+    
+        # Determine grid configuration
+        if nx is not None and ny is not None:
+            # Rectangular grid specified
+            is_rectangular = (nx != ny)
+            effective_resolution = max(nx, ny)  # Use finer dimension for safety
+            min_grid_spacing = domain_size / effective_resolution
+        
+            print(f"Rectangular grid estimation:")
+            print(f"  Grid dimensions: {nx}×{ny}")
+            print(f"  Is rectangular: {is_rectangular}")
+            print(f"  Effective resolution: {effective_resolution}")
+            print(f"  Min grid spacing: {min_grid_spacing:.8f}")
+        
+        elif resolution is not None:
+            # Square grid specified  
+            nx = ny = resolution
+            is_rectangular = False
+            effective_resolution = resolution
+            min_grid_spacing = domain_size / resolution
+        
+            print(f"Square grid estimation:")
+            print(f"  Grid dimensions: {resolution}×{resolution}")
+            print(f"  Grid spacing: {min_grid_spacing:.8f}")
+        
+        else:
+            # No resolution information - use statistical approach
+            print(f"No resolution information provided - using statistical approach")
+            return self._estimate_min_box_size_statistical(segments, fallback_percentile)
+    
+        # Calculate physics-based min box size
+        min_box_size = safety_factor * min_grid_spacing
+    
+        # Validate against segment data if available
+        if segments:
+            lengths = self._calculate_segment_lengths(segments)
+            if len(lengths) > 0:
+                min_segment = np.min(lengths[lengths > 0])
+                median_segment = np.median(lengths)
+            
+                print(f"  Validation against segments:")
+                print(f"    Min segment length: {min_segment:.8f}")
+                print(f"    Median segment length: {median_segment:.8f}")
+            
+                # For rectangular grids, be more conservative near boundaries
+                if is_rectangular:
+                    aspect_ratio = max(nx, ny) / min(nx, ny)
+                    if aspect_ratio > 2.0:
+                        print(f"    High aspect ratio detected: {aspect_ratio:.2f}")
+                        print(f"    Applying additional safety factor for rectangular grid")
+                        safety_factor *= 1.2  # 20% more conservative
+                        min_box_size = safety_factor * min_grid_spacing
+            
+                # Ensure we're not smaller than the finest details
+                if min_box_size < min_segment * 0.1:
+                    adjusted = min_segment * 0.1
+                    print(f"    → Adjusting up to avoid sub-grid noise: {adjusted:.8f}")
+                    min_box_size = adjusted
+    
+        # Check scaling range
+        extent = self._calculate_domain_extent(segments) if segments else domain_size
+        max_box_size = extent / 2
+        scaling_ratio = min_box_size / max_box_size
+        scaling_decades = np.log10(max_box_size / min_box_size)
+    
+        print(f"  Physics-based sizing results:")
+        print(f"    Safety factor: {safety_factor}")
+        print(f"    Min box size: {min_box_size:.8f}")
+        print(f"    Max box size: {max_box_size:.8f}")
+        print(f"    Scaling ratio: {scaling_ratio:.6f}")
+        print(f"    Scaling decades: {scaling_decades:.2f}")
+    
+        # Ensure sufficient scaling range
+        if scaling_decades < 1.5:  # Less than 1.5 decades
+            print(f"  → Limited scaling range detected")
+            adjusted = max_box_size * 0.01  # Force at least 2 decades
+            print(f"  → Adjusting for better scaling: {adjusted:.8f}")
+            min_box_size = adjusted
+    
+        return min_box_size
+
+    def _estimate_min_box_size_statistical(self, segments, percentile=10):
+        """Statistical fallback method when no resolution information is available."""
+        if not segments:
+            print("  Warning: No segments provided for statistical estimation")
+            return 0.001
+    
+        lengths = self._calculate_segment_lengths(segments)
+        if len(lengths) == 0:
+            print("  Warning: No valid segment lengths")
+            return 0.001
+    
+        # Use percentile instead of minimum to avoid noise
+        robust_length = np.percentile(lengths, percentile)
+        extent = self._calculate_domain_extent(segments)
+    
+        print(f"  Statistical estimation:")
+        print(f"    {percentile}th percentile length: {robust_length:.8f}")
+        print(f"    Domain extent: {extent:.6f}")
+    
+        # Conservative multiplier
+        min_box_size = robust_length * 0.8
+    
+        # Ensure sufficient scaling range
+        max_box_size = extent / 2
+        scaling_ratio = min_box_size / max_box_size
+    
+        if scaling_ratio > 0.1:  # Less than 1 decade
+            adjusted = max_box_size * 0.005  # Force ~2.3 decades
+            print(f"    → Adjusting for scaling range: {adjusted:.8f}")
+            min_box_size = adjusted
+    
+        return min_box_size
+
+    def parse_grid_resolution_from_context(self, filename_or_context):
+        """
+        Parse grid resolution from various context sources.
+    
+        Args:
+            filename_or_context: Filename, file path, or context string
+        
+        Returns:
+            tuple: (nx, ny) or (None, None)
+        """
+        if isinstance(filename_or_context, str):
+            # Try enhanced filename detection first
+            nx, ny = self.auto_detect_resolution_from_filename_enhanced(filename_or_context)
+            if nx is not None:
+                return nx, ny
+        
+            # Try parsing as direct resolution string
+            try:
+                if 'x' in filename_or_context:
+                    parts = filename_or_context.split('x')
+                    if len(parts) == 2:
+                        nx, ny = int(parts[0]), int(parts[1])
+                        return nx, ny
+                else:
+                    # Single number - assume square
+                    res = int(filename_or_context)
+                    return res, res
+            except ValueError:
+                pass
+    
+        return None, None
+
+    def validate_rectangular_grid_analysis(self, segments, nx=None, ny=None, min_box_size=None):
+        """
+        Validate analysis parameters for rectangular grids.
+    
+        Args:
+            segments: List of line segments
+            nx, ny: Grid dimensions
+            min_box_size: Minimum box size for analysis
+        
+        Returns:
+            dict: Validation results and recommendations
+        """
+        validation = {
+            'is_valid': True,
+            'warnings': [],
+            'recommendations': [],
+            'grid_info': {}
+        }
+    
+        if nx is not None and ny is not None:
+            is_rectangular = (nx != ny)
+            aspect_ratio = max(nx, ny) / min(nx, ny) if min(nx, ny) > 0 else 1.0
+            total_cells = nx * ny
+            effective_resolution = max(nx, ny)
+        
+            validation['grid_info'] = {
+                'nx': nx,
+                'ny': ny,
+                'is_rectangular': is_rectangular,
+                'aspect_ratio': aspect_ratio,
+                'total_cells': total_cells,
+                'effective_resolution': effective_resolution
+            }
+        
+            print(f"Grid validation for {nx}×{ny}:")
+            print(f"  Rectangular: {is_rectangular}")
+            print(f"  Aspect ratio: {aspect_ratio:.2f}")
+            print(f"  Total cells: {total_cells}")
+        
+            # Rectangular grid specific warnings
+            if is_rectangular:
+                if aspect_ratio > 3.0:
+                    warning = f"High aspect ratio ({aspect_ratio:.2f}) may affect fractal analysis"
+                    validation['warnings'].append(warning)
+                    validation['recommendations'].append(
+                        "Consider effects of grid anisotropy on fractal measurements")
+                    print(f"  WARNING: {warning}")
+            
+                if aspect_ratio > 1.5:
+                    validation['recommendations'].append(
+                        "Monitor for directional bias in fractal dimension calculations")
+        
+            # Resolution adequacy check
+            if effective_resolution < 100:
+                warning = f"Low effective resolution ({effective_resolution}) for fractal analysis"
+                validation['warnings'].append(warning)
+                validation['recommendations'].append(
+                    "Consider using higher resolution data for more accurate results")
+    
+        # Segment-based validation
+        if segments:
+            segment_count = len(segments)
+            validation['grid_info']['segment_count'] = segment_count
+        
+            if segment_count < 100:
+                warning = f"Low segment count ({segment_count}) may limit fractal accuracy"
+                validation['warnings'].append(warning)
+                validation['recommendations'].append(
+                    "Ensure sufficient interface complexity for reliable fractal dimension")
+        
+            # Check segment distribution for rectangular grids
+            if nx is not None and ny is not None and nx != ny:
+                x_coords = [x for (x1,y1),(x2,y2) in segments for x in [x1,x2]]
+                y_coords = [y for (x1,y1),(x2,y2) in segments for y in [y1,y2]]
+            
+                x_range = max(x_coords) - min(x_coords) if x_coords else 0
+                y_range = max(y_coords) - min(y_coords) if y_coords else 0
+            
+                if x_range > 0 and y_range > 0:
+                    segment_aspect_ratio = max(x_range, y_range) / min(x_range, y_range)
+                    grid_aspect_ratio = max(nx, ny) / min(nx, ny)
+                
+                    if abs(segment_aspect_ratio - grid_aspect_ratio) > 0.5:
+                        warning = f"Segment distribution aspect ratio ({segment_aspect_ratio:.2f}) differs from grid ({grid_aspect_ratio:.2f})"
+                        validation['warnings'].append(warning)
+    
+        # Min box size validation for rectangular grids
+        if min_box_size is not None and nx is not None and ny is not None:
+            min_grid_spacing = 1.0 / max(nx, ny)  # Assume unit domain
+            if min_box_size < min_grid_spacing * 2:
+                warning = f"Min box size ({min_box_size:.6f}) very close to grid spacing ({min_grid_spacing:.6f})"
+                validation['warnings'].append(warning)
+                validation['recommendations'].append(
+                    "Consider larger min_box_size to avoid grid artifacts")
+    
+        if validation['warnings']:
+            validation['is_valid'] = False
+            print(f"Validation completed with {len(validation['warnings'])} warnings")
+        else:
+            print(f"Validation passed - grid configuration suitable for fractal analysis")
+    
+        return validation
+
+    # Enhanced main analysis method that integrates rectangular grid support
+    def analyze_linear_region_enhanced(self, segments, fractal_type=None, plot_results=True,
+        plot_boxes=True, trim_boundary=0, box_size_factor=1.5, use_grid_optimization=True,
+        return_box_data=False, plot_separate=False, min_box_size=None, 
+        nx=None, ny=None, filename_context=None):
+        """
+        Enhanced linear region analysis with rectangular grid support.
+    
+        Args:
+            segments: List of line segments
+            fractal_type: Type of fractal (for theoretical comparison)
+            plot_results: Whether to create plots
+            plot_boxes: Whether to show box overlay
+            trim_boundary: Manual boundary trimming
+            box_size_factor: Box size reduction factor
+            use_grid_optimization: Use grid optimization
+            return_box_data: Return box counting data
+            plot_separate: Create separate plots
+            min_box_size: Minimum box size (will be auto-estimated if None)
+            nx, ny: Grid dimensions for rectangular grids
+            filename_context: Filename/context for auto-detection
+        
+        Returns:
+            Analysis results (same as original method)
+        """
+        print("\n==== ENHANCED LINEAR REGION ANALYSIS (RECTANGULAR GRID SUPPORT) ====\n")
+    
+        # Auto-detect grid resolution if not provided
+        if nx is None and ny is None and filename_context is not None:
+            nx, ny = self.parse_grid_resolution_from_context(filename_context)
+            if nx is not None:
+                print(f"Auto-detected grid: {nx}×{ny}")
+    
+        # Validate grid configuration
+        if nx is not None and ny is not None:
+            validation = self.validate_rectangular_grid_analysis(segments, nx, ny, min_box_size)
+            if not validation['is_valid']:
+                print("Grid validation warnings detected - proceeding with caution")
+                for warning in validation['warnings']:
+                    print(f"  ⚠️  {warning}")
+    
+        # Enhanced min box size estimation
+        if min_box_size is None:
+            if nx is not None and ny is not None:
+                # Use enhanced physics-based estimation for rectangular grids
+                min_box_size = self.estimate_min_box_size_physics_based_enhanced(
+                    segments, nx=nx, ny=ny, safety_factor=4)
+                print(f"Enhanced physics-based min_box_size: {min_box_size:.8f}")
+            else:
+                # Fallback to original statistical method
+                min_box_size = self.estimate_min_box_size_from_segments(segments)
+                print(f"Statistical fallback min_box_size: {min_box_size:.8f}")
+        else:
+            print(f"Using provided min_box_size: {min_box_size:.8f}")
+    
+        # Add grid information to analysis context
+        grid_info = {
+            'nx': nx,
+            'ny': ny,
+            'is_rectangular': nx != ny if nx is not None and ny is not None else False,
+            'aspect_ratio': max(nx, ny) / min(nx, ny) if nx is not None and ny is not None and min(nx, ny) > 0 else 1.0
+        }
+    
+        print(f"Grid configuration for analysis:")
+        if nx is not None and ny is not None:
+            print(f"  Dimensions: {nx}×{ny}")
+            print(f"  Type: {'Rectangular' if grid_info['is_rectangular'] else 'Square'}")
+            print(f"  Aspect ratio: {grid_info['aspect_ratio']:.2f}")
+        else:
+            print(f"  No grid information available - using segment-based analysis")
+    
+        # Call the original analyze_linear_region method with enhanced parameters
+        # The original method will handle the actual analysis
+        results = self.analyze_linear_region(
+            segments=segments,
+            fractal_type=fractal_type,
+            plot_results=plot_results,
+            plot_boxes=plot_boxes,
+            trim_boundary=trim_boundary,
+            box_size_factor=box_size_factor,
+            use_grid_optimization=use_grid_optimization,
+            return_box_data=return_box_data,
+            plot_separate=plot_separate,
+            min_box_size=min_box_size
+        )
+    
+        # Add grid information to results if returning box data
+        if return_box_data:
+            # Unpack results and add grid info
+            windows, dimensions, errors, r_squared, optimal_window, optimal_dimension, box_sizes, box_counts, bounding_box = results
+        
+            # Add grid info to a metadata dict (if you want to extend return signature)
+            # For now, just print summary with grid context
+            print(f"\nRectangular grid analysis summary:")
+            if nx is not None and ny is not None:
+                print(f"  Grid: {nx}×{ny} ({'rectangular' if grid_info['is_rectangular'] else 'square'})")
+                print(f"  Optimal dimension: {optimal_dimension:.6f}")
+            print(f"  Grid-appropriate analysis: {'✓' if not grid_info['is_rectangular'] or grid_info['aspect_ratio'] < 3 else '⚠'}")
+        
+            return results
+        else:
+            return results
+
+    # Add convenience method for RT interface analysis
+    def analyze_rt_interface(self, segments, nx=None, ny=None, filename=None, **kwargs):
+        """
+        Convenience method specifically for Rayleigh-Taylor interface analysis.
+    
+        Args:
+            segments: Interface segments from RT simulation
+            nx, ny: Grid dimensions (will auto-detect if None)
+            filename: Filename for auto-detection
+            **kwargs: Additional arguments for analyze_linear_region_enhanced
+        
+        Returns:
+            Analysis results with RT-specific context
+        """
+        print("🌊 RAYLEIGH-TAYLOR INTERFACE FRACTAL ANALYSIS")
+        print("=" * 60)
+    
+        # Auto-detect grid if needed
+        if nx is None and ny is None and filename is not None:
+            nx, ny = self.auto_detect_resolution_from_filename_enhanced(filename)
+    
+        # Set RT-appropriate defaults
+        rt_defaults = {
+            'fractal_type': None,  # RT interfaces don't have theoretical dimensions
+            'use_grid_optimization': True,  # Always use for RT
+            'box_size_factor': 1.4,  # Slightly more conservative for interfaces
+            'trim_boundary': 1,  # Small boundary trim for RT
+        }
+    
+        # Merge with user-provided kwargs
+        for key, value in rt_defaults.items():
+            if key not in kwargs:
+                kwargs[key] = value
+    
+        # Perform enhanced analysis
+        return self.analyze_linear_region_enhanced(
+            segments=segments,
+            nx=nx,
+            ny=ny,
+            filename_context=filename,
+            **kwargs
+        )
+
 def clean_memory():
     """Force garbage collection to free memory."""
     import gc
@@ -2080,27 +2603,30 @@ def clean_memory():
     plt.close('all')
     gc.collect()
 
+# Enhanced main() function with rectangular grid support
 def main():
     parser = argparse.ArgumentParser(
-        description='Universal Fractal Dimension Analysis Tool',
+        description='Universal Fractal Dimension Analysis Tool with Rectangular Grid Support',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   # Generate and analyze a Koch curve at level 5
   python fractal_analyzer.py --generate koch --level 5
 
-  # Analyze how iteration level affects dimension
-  python fractal_analyzer.py --generate sierpinski --analyze_iterations
+  # Analyze RT interface with auto-detected rectangular grid
+  python fractal_analyzer.py --file RT160x200_interface.txt --analyze_linear_region
 
-  # Analyze linear region selection with custom box sizes
-  python fractal_analyzer.py --file coastline.txt --analyze_linear_region --min_box_size 0.0005
+  # Analyze with manually specified rectangular grid
+  python fractal_analyzer.py --file interface.txt --nx 160 --ny 200 --analyze_linear_region
 
-  # Run both analyses in sequence without titles
-  python fractal_analyzer.py --generate dragon --analyze_linear_region --analyze_iterations --no-titles
+  # Dalziel validation analysis with enhanced grid support
+  python fractal_analyzer.py --file RT160x200-9000.txt --analyze_linear_region --rt_interface
 
-  # Generate publication-quality EPS plots for AMC journal
-  python fractal_analyzer.py --generate koch --level 5 --eps_plots --no-titles
+  # Generate publication-quality EPS plots for rectangular grid
+  python fractal_analyzer.py --file RT320x400_interface.txt --eps_plots --no-titles --analyze_linear_region
 """)
+
+    # Existing arguments
     parser.add_argument('--file', help='Path to file containing line segments')
     parser.add_argument('--generate', type=str, choices=['koch', 'sierpinski', 'minkowski', 'hilbert', 'dragon'],
                         help='Generate a fractal curve of specified type')
@@ -2111,10 +2637,20 @@ Examples:
                         help='Maximum box size for calculation (default: auto-determined)')
     parser.add_argument('--box_size_factor', type=float, default=1.5,
                         help='Factor by which to reduce box size in each step')
-    parser.add_argument('--no_plot', action='store_true',
-                        help='Disable plotting')
-    parser.add_argument('--no_box_plot', action='store_true',
-                        help='Disable box overlay in the curve plot')
+
+    # NEW: Rectangular grid arguments
+    parser.add_argument('--nx', type=int, default=None,
+                       help='Grid dimension in x-direction (for rectangular grids)')
+    parser.add_argument('--ny', type=int, default=None,
+                       help='Grid dimension in y-direction (for rectangular grids)')
+    parser.add_argument('--rt_interface', action='store_true',
+                       help='Use RT interface analysis mode with appropriate defaults')
+    parser.add_argument('--validate_grid', action='store_true',
+                       help='Perform grid validation analysis')
+
+    # Existing arguments continue...
+    parser.add_argument('--no_plot', action='store_true', help='Disable plotting')
+    parser.add_argument('--no_box_plot', action='store_true', help='Disable box overlay in the curve plot')
     parser.add_argument('--analyze_iterations', action='store_true',
                        help='Analyze how iteration depth affects measured dimension')
     parser.add_argument('--min_level', type=int, default=1,
@@ -2137,17 +2673,21 @@ Examples:
                        help='Generate separate plots instead of combined format for publication')
     parser.add_argument('--eps_plots', action='store_true',
                        help='Generate EPS format plots for publication quality (AMC journal requirements)')
+
     args = parser.parse_args()
 
     # Convert disable flag to use flag once at the top
     use_grid_optimization = not args.disable_grid_optimization
     print(f"Grid optimization: {'ENABLED' if use_grid_optimization else 'DISABLED'}")
 
-    # Display version info with EPS status
-    print(f"Running Enhanced Fractal Analyzer")
-    print(f"----------------------------------")
+    # Display enhanced version info
+    print(f"Running Enhanced Fractal Analyzer with Rectangular Grid Support")
+    print(f"----------------------------------------------------------------")
+    if args.nx is not None and args.ny is not None:
+        is_rect = args.nx != args.ny
+        print(f"Grid configuration: {args.nx}×{args.ny} ({'rectangular' if is_rect else 'square'})")
     if args.eps_plots:
-        print(f"EPS plots: ENABLED (Publication quality for AMC journal)")
+        print(f"EPS plots: ENABLED (Publication quality)")
     else:
         print(f"EPS plots: DISABLED (Using PNG format)")
 
@@ -2157,17 +2697,13 @@ Examples:
     # Clean memory before starting
     clean_memory()
 
-    # Generate a fractal curve if requested
+    # Generate a fractal curve if requested (existing code)
     if args.generate:
         _, segments = analyzer.generate_fractal(args.generate, args.level)
-
-        # Choose appropriate extension for output file
-        extension = '.eps' if args.eps_plots else '.txt'
-        filename = f'{args.generate}_segments_level_{args.level}.txt'  # Keep data file as .txt
+        filename = f'{args.generate}_segments_level_{args.level}.txt'
         analyzer.write_segments_to_file(segments, filename)
         print(f"{args.generate.capitalize()} curve saved to {filename}")
 
-        # Use this curve for analysis if no file is specified
         if args.file is None:
             args.file = filename
             analyzer.fractal_type = args.generate
@@ -2181,38 +2717,92 @@ Examples:
             print("No valid line segments found. Exiting.")
             return
 
-        # Analyze linear region if requested
-        if args.analyze_linear_region:
-            print("\n=== Starting Linear Region Analysis ===\n")
-            if args.eps_plots:
-                print("Generating publication-quality EPS plots for linear region analysis...")
-            analyzer.analyze_linear_region(segments, args.fractal_type, not args.no_plot,
-                                         not args.no_box_plot, trim_boundary=args.trim_boundary,
-                                         box_size_factor=args.box_size_factor,
-                                         use_grid_optimization=use_grid_optimization,
-                                         plot_separate=args.plot_separate,
-                                         min_box_size=args.min_box_size)
+        # ENHANCED: Auto-detect grid resolution if not provided
+        if args.nx is None and args.ny is None:
+            nx, ny = analyzer.auto_detect_resolution_from_filename_enhanced(args.file)
+            if nx is not None:
+                args.nx, args.ny = nx, ny
+                print(f"Auto-detected grid resolution: {args.nx}×{args.ny}")
 
-            print("\n=== Linear Region Analysis Complete ===\n")
+        # ENHANCED: Grid validation if requested
+        if args.validate_grid and args.nx is not None and args.ny is not None:
+            print("\n=== GRID VALIDATION ANALYSIS ===")
+            validation = analyzer.validate_rectangular_grid_analysis(segments, args.nx, args.ny, args.min_box_size)
 
-        # Standard dimension calculation if neither special analysis is requested
-        if not args.analyze_linear_region and not args.analyze_iterations:
+            print(f"Grid validation results:")
+            print(f"  Valid: {'✓' if validation['is_valid'] else '⚠'}")
+            print(f"  Warnings: {len(validation['warnings'])}")
+            print(f"  Recommendations: {len(validation['recommendations'])}")
+
+            if validation['warnings']:
+                print("Warnings:")
+                for warning in validation['warnings']:
+                    print(f"  - {warning}")
+
+            if validation['recommendations']:
+                print("Recommendations:")
+                for rec in validation['recommendations']:
+                    print(f"  - {rec}")
+            print("=== END GRID VALIDATION ===\n")
+
+        # ENHANCED: RT interface analysis mode
+        if args.rt_interface:
+            print("\n=== RT INTERFACE ANALYSIS MODE ===")
+            analyzer.analyze_rt_interface(
+                segments=segments,
+                nx=args.nx,
+                ny=args.ny,
+                filename=args.file,
+                plot_results=not args.no_plot,
+                plot_boxes=not args.no_box_plot,
+                plot_separate=args.plot_separate,
+                return_box_data=False
+            )
+            print("=== RT INTERFACE ANALYSIS COMPLETE ===\n")
+
+        # ENHANCED: Linear region analysis with rectangular grid support
+        elif args.analyze_linear_region:
+            print("\n=== Enhanced Linear Region Analysis ===")
+            analyzer.analyze_linear_region_enhanced(
+                segments=segments,
+                fractal_type=args.fractal_type,
+                plot_results=not args.no_plot,
+                plot_boxes=not args.no_box_plot,
+                trim_boundary=args.trim_boundary,
+                box_size_factor=args.box_size_factor,
+                use_grid_optimization=use_grid_optimization,
+                plot_separate=args.plot_separate,
+                min_box_size=args.min_box_size,
+                nx=args.nx,
+                ny=args.ny,
+                filename_context=args.file
+            )
+            print("=== Enhanced Linear Region Analysis Complete ===")
+
+        # Standard dimension calculation (enhanced with grid info)
+        elif not args.analyze_iterations:
             # Auto-determine max box size if not provided
             if args.max_box_size is None:
                 min_x = min(min(s[0][0], s[1][0]) for s in segments)
                 max_x = max(max(s[0][0], s[1][0]) for s in segments)
                 min_y = min(min(s[0][1], s[1][1]) for s in segments)
                 max_y = max(max(s[0][1], s[1][1]) for s in segments)
-
                 extent = max(max_x - min_x, max_y - min_y)
                 args.max_box_size = extent / 2
                 print(f"Auto-determined max box size: {args.max_box_size}")
 
             try:
-                # Perform box counting
+                # ENHANCED: Use enhanced min box size estimation
                 if args.min_box_size is None:
-                    args.min_box_size = analyzer.estimate_min_box_size_from_segments(segments)
-                    print(f"Auto-estimated min_box_size: {args.min_box_size:.6f}")
+                    if args.nx is not None and args.ny is not None:
+                        args.min_box_size = analyzer.estimate_min_box_size_physics_based_enhanced(
+                            segments, nx=args.nx, ny=args.ny)
+                        print(f"Enhanced auto-estimated min_box_size: {args.min_box_size:.8f}")
+                    else:
+                        args.min_box_size = analyzer.estimate_min_box_size_from_segments(segments)
+                        print(f"Standard auto-estimated min_box_size: {args.min_box_size:.8f}")
+
+                # Perform box counting
                 if args.disable_grid_optimization:
                     box_sizes, box_counts, bounding_box = analyzer.box_counting_optimized(
                         segments, args.min_box_size, args.max_box_size, args.box_size_factor)
@@ -2224,8 +2814,14 @@ Examples:
                 fractal_dimension, error, intercept = analyzer.calculate_fractal_dimension(
                     box_sizes, box_counts)
 
-                # Print results
+                # ENHANCED: Print results with grid context
                 print(f"Results:")
+                if args.nx is not None and args.ny is not None:
+                    is_rect = args.nx != args.ny
+                    aspect_ratio = max(args.nx, args.ny) / min(args.nx, args.ny)
+                    print(f"  Grid: {args.nx}×{args.ny} ({'rectangular' if is_rect else 'square'})")
+                    if is_rect:
+                        print(f"  Aspect ratio: {aspect_ratio:.2f}")
                 print(f"  Fractal Dimension: {fractal_dimension:.6f} ± {error:.6f}")
                 if args.fractal_type:
                     theoretical = analyzer.theoretical_dimensions[args.fractal_type]
@@ -2234,26 +2830,21 @@ Examples:
 
                 # Plot if requested
                 if not args.no_plot:
-                    if args.eps_plots:
-                        print("Generating publication-quality EPS plots...")
                     analyzer.plot_results_separate(segments, box_sizes, box_counts,
                                                  fractal_dimension, error, bounding_box, intercept,
                                                  plot_boxes=not args.no_box_plot)
-                    # Also plot the log-log analysis
                     analyzer._plot_loglog(box_sizes, box_counts, fractal_dimension, error, intercept)
 
             except Exception as e:
                 print(f"Error during calculation: {str(e)}")
                 return float('nan'), float('nan')
 
-    # Analyze iteration depth relationship
+    # Analyze iteration depth relationship (existing code, unchanged)
     if args.analyze_iterations:
         if not args.fractal_type and not args.generate:
             print("Error: Must specify --fractal_type or --generate for iteration analysis")
             return
-        print("\n=== Starting Iteration Analysis ===\n")
-        if args.eps_plots:
-            print("Generating publication-quality EPS plots for iteration analysis...")
+        print("\n=== Starting Iteration Analysis ===")
         fractal_type = args.generate or args.fractal_type
 
         analyzer.analyze_iterations(args.min_level, args.max_level, fractal_type,
@@ -2261,28 +2852,46 @@ Examples:
                                   box_size_factor=args.box_size_factor,
                                   use_grid_optimization=use_grid_optimization,
                                   min_box_size=args.min_box_size)
+        print("=== Iteration Analysis Complete ===")
 
-        print("\n=== Iteration Analysis Complete ===\n")
-
-    if not (args.analyze_linear_region or args.analyze_iterations or args.file or args.generate):
-        print("No input file specified and no curve generation requested.")
-        print("Use --file to specify an input file or --generate to create a fractal curve.")
-        parser.print_help()
-
-    # Print final summary
+    # Enhanced final summary
     if args.eps_plots:
         print("\n" + "="*60)
         print("PUBLICATION-QUALITY EPS PLOTS GENERATED")
         print("="*60)
-        print("All plots have been saved in EPS format with the following features:")
-        print("• High resolution (300 DPI)")
-        print("• Vector format for scalability")
-        print("• Publication-ready fonts and sizing")
+        print("Features:")
+        print("• High resolution (300 DPI) vector graphics")
+        print("• Rectangular grid aware analysis")
         print("• AMC journal compliant formatting")
-        print("• Tight bounding boxes for optimal layout")
-        print("\nThese EPS files are ready for submission to Applied Mathematics and Computation")
-        print("or other academic journals requiring vector graphics.")
+        if args.nx is not None and args.ny is not None:
+            is_rect = args.nx != args.ny
+            print(f"• Grid-specific optimization for {args.nx}×{args.ny} {'rectangular' if is_rect else 'square'} grid")
 
+# USAGE EXAMPLES for your Dalziel validation work:
+
+"""
+EXAMPLES FOR DALZIEL VALIDATION WITH RECTANGULAR GRIDS:
+
+# 1. Auto-detection from filename
+python fractal_analyzer.py --file RT160x200-9000.txt --analyze_linear_region --eps_plots
+
+# 2. Manual grid specification
+python fractal_analyzer.py --file interface_segments.txt --nx 160 --ny 200 --analyze_linear_region
+
+# 3. RT interface mode (applies appropriate defaults)
+python fractal_analyzer.py --file RT160x200-9000.txt --rt_interface --eps_plots --no_titles
+
+# 4. Grid validation before analysis
+python fractal_analyzer.py --file RT320x400-9000.txt --validate_grid --analyze_linear_region
+
+# 5. Full validation workflow
+python fractal_analyzer.py --file RT640x800-9000.txt --rt_interface --validate_grid --eps_plots --plot_separate
+
+# 6. Convergence study across rectangular grids
+for res in "160x200" "320x400" "640x800" "1280x1600"; do
+    python fractal_analyzer.py --file RT${res}-9000.txt --rt_interface --eps_plots --no_titles
+done
+"""
 
 if __name__ == "__main__":
     main()

@@ -28,31 +28,59 @@ def configure_matplotlib_for_eps():
     # Set backend that supports EPS
     matplotlib.use('Agg')
     
-    # Configure for publication-quality EPS
+    # Enhanced configuration for publication-quality EPS with better readability
     plt.rcParams.update({
-        'font.size': 12,
+        # FONT SETTINGS - Increased sizes for better readability
+        'font.size': 14,              # Increased from 12
         'font.family': 'serif',
         'font.serif': ['Times New Roman', 'Times', 'DejaVu Serif', 'Computer Modern Roman'],
-        'text.usetex': False,  # Set to True if LaTeX is available
-        'axes.linewidth': 1.0,
-        'axes.labelsize': 12,
-        'axes.titlesize': 14,
-        'xtick.labelsize': 10,
-        'ytick.labelsize': 10,
-        'legend.fontsize': 10,
-        'figure.figsize': [8, 6],  # AMC recommended size
-        'figure.dpi': 300,  # High DPI for quality
+        'text.usetex': False,
+        
+        # AXES AND LABELS - Larger for better visibility
+        'axes.linewidth': 1.2,        # Slightly thicker
+        'axes.labelsize': 16,         # Increased from 12
+        'axes.titlesize': 18,         # Increased from 14
+        'axes.labelweight': 'bold',   # Bold labels for better visibility
+        
+        # TICK LABELS - Larger and bolder
+        'xtick.labelsize': 14,        # Increased from 10
+        'ytick.labelsize': 14,        # Increased from 10
+        'xtick.major.width': 1.2,
+        'ytick.major.width': 1.2,
+        'xtick.minor.width': 0.8,
+        'ytick.minor.width': 0.8,
+        
+        # LEGEND - More readable
+        'legend.fontsize': 12,        # Increased from 10
+        'legend.frameon': True,
+        'legend.fancybox': True,
+        'legend.shadow': True,
+        'legend.framealpha': 0.9,
+        
+        # FIGURE SETTINGS - Optimized for AMC
+        'figure.figsize': [10, 8],    # Larger default size
+        'figure.dpi': 300,
         'savefig.dpi': 300,
         'savefig.format': 'eps',
         'savefig.bbox': 'tight',
-        'savefig.pad_inches': 0.1,
-        'lines.linewidth': 1.5,
-        'lines.markersize': 6,
-        'grid.linewidth': 0.5,
-        'grid.alpha': 0.7
+        'savefig.pad_inches': 0.2,    # Slightly more padding
+        
+        # LINES AND MARKERS - More visible
+        'lines.linewidth': 2.0,       # Increased from 1.5
+        'lines.markersize': 8,        # Increased from 6
+        'lines.markeredgewidth': 1.0,
+        
+        # GRID - Subtle but visible
+        'grid.linewidth': 0.8,        # Slightly thicker
+        'grid.alpha': 0.6,            # Less transparent
+        
+        # MATH TEXT - Better rendering
+        'mathtext.fontset': 'stix',
+        'mathtext.default': 'regular'
     })
     
-    print("Configured matplotlib for publication-quality EPS output")
+    print("Configured matplotlib for publication-quality EPS output with enhanced readability")
+
 
 def detect_file_format(filename):
     """
@@ -233,9 +261,9 @@ def read_segments_fast(filename, subsample=None):
         return read_segments_robust_fallback(filename, subsample)
 
 def parse_arguments():
-    """Parse command line arguments."""
+    """Parse command line arguments with enhanced defaults for readability."""
     parser = argparse.ArgumentParser(
-        description='Plot curve segments from a data file (optimized for large files)',
+        description='Plot curve segments from a data file (optimized for large files with enhanced readability)',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
 Examples:
@@ -257,6 +285,11 @@ Performance tips:
   - Use vector formats (PDF, SVG, EPS) for best quality
   - Use PNG with lower DPI for faster rendering
   - Use --eps_plots for publication-quality AMC-compliant figures
+
+Readability enhancements:
+  - Larger fonts and thicker lines for better visibility
+  - Enhanced axis formatting and grid display
+  - Optimized figure sizes for publication quality
         '''
     )
     
@@ -269,18 +302,18 @@ Performance tips:
     parser.add_argument('--title', '-t',
                        help='Plot title (default: derived from filename)')
     
-    parser.add_argument('--figsize', nargs=2, type=float, default=[10, 10],
+    parser.add_argument('--figsize', nargs=2, type=float, default=[12, 10],  # Enhanced default
                        metavar=('WIDTH', 'HEIGHT'),
-                       help='Figure size in inches (default: 10 10, or 8 6 for EPS)')
+                       help='Figure size in inches (default: 12 10 for better readability, or 10 8 for EPS)')
     
     parser.add_argument('--grid', action='store_true',
-                       help='Show grid on plot')
+                       help='Show enhanced grid on plot')
     
-    parser.add_argument('--dpi', type=int, default=150,
-                       help='DPI for raster formats (default: 150, use 300+ for high quality)')
+    parser.add_argument('--dpi', type=int, default=300,  # Higher default DPI
+                       help='DPI for raster formats (default: 300 for better quality)')
     
-    parser.add_argument('--linewidth', '-lw', type=float, default=0.5,
-                       help='Line width for plotting (default: 0.5 for large datasets, 1.5 for EPS)')
+    parser.add_argument('--linewidth', '-lw', type=float, default=1.0,  # Thicker default
+                       help='Line width for plotting (default: 1.0 for better visibility, 2.0 for EPS)')
     
     parser.add_argument('--color', '-c', default='black',
                        help='Line color (default: black)')
@@ -344,49 +377,52 @@ def save_plot_with_format(fig, filename_base, eps_plots, dpi):
 
 def plot_curve_fast(segments, args):
     """
-    Plot the curve segments using LineCollection for speed.
+    Plot the curve segments using LineCollection for speed with enhanced readability.
     
     Args:
         segments: numpy array of shape (N, 4) with segments
         args: Parsed command line arguments
     """
-    print("Creating plot...")
+    print("Creating enhanced plot...")
     start_time = time.time()
     
-    # Adjust parameters for EPS output
+    # Enhanced parameters for better readability
     if args.eps_plots:
-        figsize = [8, 6]  # AMC recommended size for EPS
-        linewidth = 1.5 if args.linewidth == 0.5 else args.linewidth  # Default EPS linewidth
+        figsize = [10, 8]  # Larger AMC size for better readability
+        linewidth = 2.0 if args.linewidth == 0.5 else max(1.5, args.linewidth)  # Thicker default
     else:
-        figsize = args.figsize
-        linewidth = args.linewidth
+        figsize = [12, 10] if args.figsize == [10, 10] else args.figsize  # Larger default
+        linewidth = max(1.0, args.linewidth)  # Ensure minimum readable width
     
-    # Create figure and axis
+    # Create figure and axis with enhanced styling
     fig, ax = plt.subplots(figsize=figsize)
     
+    # Enhance axis spines for better visibility
+    for spine in ax.spines.values():
+        spine.set_linewidth(1.5)
+    
     # Convert segments to line collection format
-    # segments has shape (N, 4) where each row is [x1, y1, x2, y2]
-    # LineCollection needs list of [(x1,y1), (x2,y2)] pairs
     lines = [[(x1, y1), (x2, y2)] for x1, y1, x2, y2 in segments]
     
-    # Create LineCollection - MUCH faster than individual plot calls
+    # Create LineCollection with enhanced visibility
     lc = mc.LineCollection(lines, 
                           linewidths=linewidth,
                           colors=args.color,
                           alpha=args.alpha,
-                          capstyle='round')
+                          capstyle='round',
+                          joinstyle='round')  # Better line joins
     
     ax.add_collection(lc)
     
-    # Set axis limits based on data
+    # Set axis limits based on data with better margins
     all_x = np.concatenate([segments[:, 0], segments[:, 2]])
     all_y = np.concatenate([segments[:, 1], segments[:, 3]])
     
-    margin = 0.02 * max(all_x.max() - all_x.min(), all_y.max() - all_y.min())
+    margin = 0.03 * max(all_x.max() - all_x.min(), all_y.max() - all_y.min())  # Slightly larger margin
     ax.set_xlim(all_x.min() - margin, all_x.max() + margin)
     ax.set_ylim(all_y.min() - margin, all_y.max() + margin)
     
-    # Set title (suppress for journal figures or if no_title flag is set)
+    # Enhanced title formatting
     if not args.no_title:
         if args.title:
             title = args.title
@@ -396,24 +432,28 @@ def plot_curve_fast(segments, args):
             if len(segments) > 10000:
                 title += f" ({len(segments):,} segments)"
         
-        ax.set_title(title, fontsize=14, fontweight='bold')
+        ax.set_title(title, fontsize=18, fontweight='bold', pad=15)
     
-    # Labels and formatting
-    ax.set_xlabel('X', fontsize=12)
-    ax.set_ylabel('Y', fontsize=12)
+    # Enhanced labels and formatting
+    ax.set_xlabel('X', fontsize=16, fontweight='bold', labelpad=10)
+    ax.set_ylabel('Y', fontsize=16, fontweight='bold', labelpad=10)
     
-    # Grid
+    # Enhanced tick formatting
+    ax.tick_params(axis='both', which='major', labelsize=14, width=1.2, length=6)
+    ax.tick_params(axis='both', which='minor', width=0.8, length=4)
+    
+    # Enhanced grid
     if args.grid:
-        ax.grid(True, alpha=0.3, zorder=0)
+        ax.grid(True, alpha=0.6, zorder=0, linewidth=0.8)
     
     # Equal aspect ratio for proper geometry
     ax.set_aspect('equal', adjustable='box')
     
-    # Tight layout
-    plt.tight_layout()
+    # Tight layout with better spacing
+    plt.tight_layout(pad=1.5)
     
     plot_time = time.time() - start_time
-    print(f"Created plot in {plot_time:.2f} seconds")
+    print(f"Created enhanced plot in {plot_time:.2f} seconds")
     
     return fig
 
@@ -463,7 +503,7 @@ def save_plot(fig, output_file, dpi, eps_plots):
         sys.exit(1)
 
 def main():
-    """Main function."""
+    """Main function with enhanced readability features."""
     total_start = time.time()
     
     args = parse_arguments()
@@ -472,30 +512,32 @@ def main():
     if args.eps_plots:
         configure_matplotlib_for_eps()
         print("EPS plots: ENABLED (Publication quality for AMC journal)")
+        print("Enhanced readability features active for publication")
     else:
-        print("EPS plots: DISABLED (Using standard PNG format)")
+        print("EPS plots: DISABLED (Using enhanced PNG format)")
+        print("Enhanced readability features active for better visualization")
     
     # Read segments from input file
     segments = read_segments_fast(args.input_file, args.subsample)
     
-    # Performance recommendations
+    # Enhanced performance recommendations
     if len(segments) > 100000:
         print(f"\nPerformance note: {len(segments):,} segments is quite large.")
         if not args.eps_plots:
             print("Consider using:")
             print("  --subsample 50000     (for faster rendering)")
-            print("  --linewidth 0.3       (thinner lines)")
-            print("  --dpi 150             (lower resolution)")
+            print("  --linewidth 0.8       (thinner lines, still readable)")
+            print("  --dpi 200             (balanced quality/speed)")
             print("  --outfile plot.pdf    (vector format)")
             print("  --eps_plots           (publication quality)")
         else:
-            print("EPS mode active - optimized for publication quality")
+            print("EPS mode active - optimized for publication quality with enhanced readability")
         print()
     
     # Determine output filename
     output_file = determine_output_filename(args.input_file, args.outfile, args.eps_plots)
     
-    # Create plot
+    # Create enhanced plot
     fig = plot_curve_fast(segments, args)
     
     # Save plot
@@ -503,16 +545,24 @@ def main():
     
     total_time = time.time() - total_start
     print(f"\nTotal time: {total_time:.2f} seconds")
-    print(f"Plotted {len(segments):,} line segments")
+    print(f"Plotted {len(segments):,} line segments with enhanced readability")
     
     if args.eps_plots:
-        print("\n" + "="*50)
+        print("\n" + "="*60)
         print("PUBLICATION-QUALITY EPS PLOT GENERATED")
-        print("="*50)
+        print("="*60)
         print("• High resolution (300 DPI)")
         print("• Vector format for scalability")
+        print("• Enhanced fonts and line weights for readability")
         print("• AMC journal compliant formatting")
         print("• Ready for academic publication")
+    else:
+        print("\n" + "="*50)
+        print("ENHANCED READABILITY PLOT GENERATED")
+        print("="*50)
+        print("• Larger fonts and thicker lines")
+        print("• Better axis formatting")
+        print("• Optimized for clear visualization")
     
     plt.close(fig)
 
