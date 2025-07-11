@@ -8,6 +8,7 @@ MAJOR ENHANCEMENTS:
 - Individual convergence plots for each time point
 - Evolution summary plots showing convergence quality over time
 - Enhanced plotting and analysis capabilities
+- FIXED: Field name compatibility between rt_analyzer.py and enhanced analyzer
 
 This script combines the best features of temporal evolution analysis and resolution convergence studies,
 with full support for rectangular grids, multiple interface extraction methods, and smart parallel processing.
@@ -377,9 +378,10 @@ def create_success_result(base_result, vtk_analysis_result, vtk_file, actual_tim
     result.update({
         'actual_time': actual_time,
         'time_error': abs(actual_time - base_result['target_time']),
-        'fractal_dim': vtk_analysis_result.get('fractal_dim', np.nan),
-        'fd_error': vtk_analysis_result.get('fd_error', np.nan),
-        'fd_r_squared': vtk_analysis_result.get('fd_r_squared', np.nan),
+        # FIXED: Map rt_analyzer field names to expected field names
+        'fractal_dim': vtk_analysis_result.get('fractal_dim', vtk_analysis_result.get('dimension', np.nan)),
+        'fd_error': vtk_analysis_result.get('fd_error', vtk_analysis_result.get('error', np.nan)),
+        'fd_r_squared': vtk_analysis_result.get('fd_r_squared', vtk_analysis_result.get('r_squared', np.nan)),
         'h_total': vtk_analysis_result.get('h_total', np.nan),
         'ht': vtk_analysis_result.get('ht', np.nan),
         'hb': vtk_analysis_result.get('hb', np.nan),
@@ -394,10 +396,11 @@ def create_success_result(base_result, vtk_analysis_result, vtk_file, actual_tim
     if 'y_center' in vtk_analysis_result:
         result['y_center'] = vtk_analysis_result['y_center']
     elif 'mixing_zone_center' in vtk_analysis_result:
-        # New Dalziel method
+        # New Dalziel method - map mixing_zone_center to y_center
         result['y_center'] = vtk_analysis_result['mixing_zone_center']
+        print(f"DEBUG: Mapped 'mixing_zone_center' -> 'y_center': {result['y_center']:.6f}")
     else:
-        # Fallback calculation
+        # Fallback calculation using available fields
         h0 = vtk_analysis_result.get('h0', 0.5)
         ht = vtk_analysis_result.get('ht', 0.0)
         hb = vtk_analysis_result.get('hb', 0.0)
@@ -434,7 +437,7 @@ def create_failure_result(base_result, error_message, vtk_file=None, actual_time
     })
     return result
 
-	# Part 2: Core analysis functions
+# Part 2: Core analysis functions
 
 def analyze_single_file(vtk_file, analyzer, analysis_params):
     """
@@ -458,6 +461,32 @@ def analyze_single_file(vtk_file, analyzer, analysis_params):
             h0=analysis_params.get('h0', 0.5),
             min_box_size=analysis_params.get('min_box_size', None)
         )
+        
+        # Add this debug line to identify field mapping issues
+        print(f"DEBUG: RT analyzer returned fields: {list(result.keys())}")
+       
+        print(f"DEBUG: Checking for y_center and mixing_zone_center:")
+        print(f"  'y_center' in result: {'y_center' in result}")
+        print(f"  'mixing_zone_center' in result: {'mixing_zone_center' in result}")
+        if 'mixing_zone_center' in result:
+            print(f"  mixing_zone_center value: {result['mixing_zone_center']}")
+
+        # COMPATIBILITY: Map rt_analyzer field names if needed
+        if 'dimension' in result and 'fractal_dim' not in result:
+            result['fractal_dim'] = result['dimension']
+            print(f"DEBUG: Mapped 'dimension' -> 'fractal_dim': {result['fractal_dim']}")
+        
+        if 'error' in result and 'fd_error' not in result:
+            result['fd_error'] = result['error'] 
+            print(f"DEBUG: Mapped 'error' -> 'fd_error': {result['fd_error']}")
+        
+        if 'r_squared' in result and 'fd_r_squared' not in result:
+            result['fd_r_squared'] = result['r_squared']
+            print(f"DEBUG: Mapped 'r_squared' -> 'fd_r_squared': {result['fd_r_squared']}")
+
+        if 'mixing_zone_center' in result and 'y_center' not in result:
+            result['y_center'] = result['mixing_zone_center']
+            print(f"DEBUG: Mapped 'mixing_zone_center' -> 'y_center': {result['y_center']}")
 
         # Extract interface for segment count
         data = analyzer.read_vtk_file(vtk_file)

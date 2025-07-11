@@ -2365,32 +2365,6 @@ class RTAnalyzer:
             else:
                 print(f"\n✅ Analysis conditions are optimal")
         
-            # Additional diagnostics for Dalziel method
-            if mixing_method == 'dalziel':
-                # Handle both old and new Dalziel method output formats
-                if 'mixing_zone_center' in mixing:
-                    # New corrected Dalziel method
-                    print(f"  Mixing zone center: {mixing['mixing_zone_center']:.6f}")
-                    print(f"  Mixing zone width: {mixing['mixing_zone_width']:.6f}")
-                    print(f"  Interface offset: {mixing['interface_offset']:.6f}")
-                    print(f"  h_10 (5% crossing): {mixing['h_10']:.6f}")
-                    print(f"  h_11 (95% crossing): {mixing['h_11']:.6f}")
-                elif 'y_center' in mixing:
-                    # Old Dalziel method (fallback compatibility)
-                    print(f"  Mixing zone center: {mixing['y_center']:.6f}")
-    
-                # Common parameters
-                if 'mixing_fraction' in mixing:
-                    print(f"  Mixing fraction: {mixing['mixing_fraction']:.4f}")
-                if 'lower_threshold' in mixing and 'upper_threshold' in mixing:
-                    print(f"  Thresholds: {mixing['lower_threshold']:.2f} - {mixing['upper_threshold']:.2f}")
-    
-                # Show method used
-                if 'method' in mixing:
-                    print(f"  Method: {mixing['method']}")
-                    if mixing['method'] == 'dalziel_corrected':
-                        print(f"  ✅ Using corrected Dalziel interpolation method")
-
             # Save interface data
             interface_file = os.path.join(file_dir, 'interface.dat')
             
@@ -2499,7 +2473,7 @@ class RTAnalyzer:
                     plt.grid(True)
                     plt.savefig(os.path.join(file_dir, 'fractal_dimension.png'), dpi=300)
                     plt.close()
-            
+
             # Prepare return results with enhanced grid information
             result = {
                 'time': data['time'],
@@ -2519,13 +2493,55 @@ class RTAnalyzer:
             
             # Add Dalziel-specific results
             if mixing_method == 'dalziel':
-                result.update({
-                    'y_center': mixing['y_center'],
-                    'mixing_fraction': mixing['mixing_fraction'],
-                    'lower_threshold': mixing['lower_threshold'],
-                    'upper_threshold': mixing['upper_threshold']
-                })
-            
+                # Handle both old and new Dalziel method output formats
+                if 'mixing_zone_center' in mixing:
+                    # New corrected Dalziel method
+                    result.update({
+                        'y_center': mixing['mixing_zone_center'],  # Map to y_center for compatibility
+                        'mixing_zone_center': mixing['mixing_zone_center'],
+                        'mixing_zone_width': mixing.get('mixing_zone_width', 0.0),
+                        'interface_offset': mixing.get('interface_offset', 0.0),
+                        'h_10': mixing.get('h_10'),
+                        'h_11': mixing.get('h_11'),
+                        'mixing_fraction': mixing.get('mixing_fraction', 0.0),
+                        'lower_threshold': mixing.get('lower_threshold', 0.05),
+                        'upper_threshold': mixing.get('upper_threshold', 0.95)
+                    })
+                elif 'y_center' in mixing:
+                    # Old Dalziel method (fallback compatibility)
+                    result.update({
+                        'y_center': mixing['y_center'],
+                        'mixing_fraction': mixing.get('mixing_fraction', 0.0),
+                        'lower_threshold': mixing.get('lower_threshold', 0.05),
+                        'upper_threshold': mixing.get('upper_threshold', 0.95)
+                    })
+
+            # Additional diagnostics for Dalziel method
+            if mixing_method == 'dalziel':
+                # Handle both old and new Dalziel method output formats
+                if 'mixing_zone_center' in mixing:
+                    # New corrected Dalziel method
+                    print(f"  Mixing zone center: {mixing['mixing_zone_center']:.6f}")
+                    print(f"  Mixing zone width: {mixing['mixing_zone_width']:.6f}")
+                    print(f"  Interface offset: {mixing['interface_offset']:.6f}")
+                    print(f"  h_10 (5% crossing): {mixing['h_10']:.6f}")
+                    print(f"  h_11 (95% crossing): {mixing['h_11']:.6f}")
+                elif 'y_center' in mixing:
+                    # Old Dalziel method (fallback compatibility)
+                    print(f"  Mixing zone center: {mixing['y_center']:.6f}")
+    
+                # Common parameters
+                if 'mixing_fraction' in mixing:
+                    print(f"  Mixing fraction: {mixing['mixing_fraction']:.4f}")
+                if 'lower_threshold' in mixing and 'upper_threshold' in mixing:
+                    print(f"  Thresholds: {mixing['lower_threshold']:.2f} - {mixing['upper_threshold']:.2f}")
+    
+                # Show method used
+                if 'method' in mixing:
+                    print(f"  Method: {mixing['method']}")
+                    if mixing['method'] == 'dalziel_corrected':
+                        print(f"  ✅ Using corrected Dalziel interpolation method")
+
             return result
 
         def process_vtk_series(self, vtk_pattern, resolution=None, mixing_method='dalziel'):
