@@ -1,0 +1,70 @@
+\begin{thebibliography}{10}
+\expandafter\ifx\csname url\endcsname\relax
+  \def\url#1{\texttt{#1}}\fi
+\expandafter\ifx\csname urlprefix\endcsname\relax\def\urlprefix{URL }\fi
+\expandafter\ifx\csname href\endcsname\relax
+  \def\href#1#2{#2} \def\path#1{#1}\fi
+
+\bibitem{liebovitch1989}
+L.~S. Liebovitch, T.~T{\'o}th, A fast algorithm to determine fractal dimensions
+  by box counting, Physics Letters A 141~(8-9) (1989) 386--390.
+
+\bibitem{bouda2016}
+M.~Bouda, J.~S. Caplan, J.~E. Saiers, Box-counting dimension revisited:
+  presenting an efficient method of minimizing quantization error and an
+  assessment of the self-similarity of structural root systems, Frontiers in
+  Plant Science 7 (2016) 149.
+\newblock \href {https://doi.org/10.3389/fpls.2016.00149}
+  {\path{doi:10.3389/fpls.2016.00149}}.
+
+\bibitem{theiler1990}
+J.~Theiler, Estimating fractal dimension, Journal of the Optical Society of
+  America A 7~(6) (1990) 1055--1073.
+
+\bibitem{sarkar1994}
+N.~Sarkar, B.~B. Chaudhuri, An efficient differential box-counting approach to
+  compute fractal dimension of image, IEEE Transactions on Systems, Man, and
+  Cybernetics 24~(1) (1994) 115--120.
+\newblock \href {https://doi.org/10.1109/21.259692}
+  {\path{doi:10.1109/21.259692}}.
+
+\bibitem{buczkowski1998}
+S.~Buczkowski, S.~Kyriacos, F.~Nekka, L.~Cartilier, The modified box-counting
+  method: analysis of some characteristic parameters, Pattern Recognition
+  31~(4) (1998) 411--418.
+\newblock \href {https://doi.org/10.1016/S0031-3203(97)00054-X}
+  {\path{doi:10.1016/S0031-3203(97)00054-X}}.
+
+\bibitem{foroutan1999}
+K.~Foroutan-pour, P.~Dutilleul, D.~L. Smith, Advances in the implementation of
+  the box-counting method of fractal dimension estimation, Applied Mathematics
+  and Computation 105~(2-3) (1999) 195--210.
+
+\bibitem{roy2007}
+A.~Roy, E.~Perfect, W.~M. Dunne, L.~D. McKay, Fractal characterization of
+  fracture networks: An improved box-counting technique, Journal of Geophysical
+  Research: Solid Earth 112~(B12) (2007).
+
+\bibitem{wu2020}
+J.~Wu, X.~Jin, S.~Mi, J.~Tang, An effective method to compute the box-counting
+  dimension based on the mathematical definition and intervals, Results in
+  Engineering 6 (2020) 100106.
+\newblock \href {https://doi.org/10.1016/j.rineng.2020.100106}
+  {\path{doi:10.1016/j.rineng.2020.100106}}.
+
+\bibitem{gonzato1998}
+G.~Gonzato, F.~Mulargia, E.~Tosatti, A practical implementation of the box
+  counting algorithm, Computers \& Geosciences 24~(1) (1998) 95--100.
+
+\bibitem{syromyatnikov1993}
+S.~N. Syromyatnikov, Fractal dimensionality in {R}ayleigh-{T}aylor instability,
+  Fluid Dynamics 28~(5) (1993) 630--632.
+
+\bibitem{dalziel1999}
+S.~B. Dalziel, P.~F. Linden, D.~L. Youngs, Self-similarity and internal
+  structure of turbulence induced by {Rayleigh--Taylor} instability, Journal of
+  Fluid Mechanics 399 (1999) 1--48.
+\newblock \href {https://doi.org/10.1017/S002211209900614X}
+  {\path{doi:10.1017/S002211209900614X}}.
+
+\end{thebibliography}
