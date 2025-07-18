@@ -1,35 +1,219 @@
-# rt_analyzer_v2.py
+# rt_analyzer.py - REBUILT VERSION with Complete Optimization
 import numpy as np
 import pandas as pd
-from scipy import stats
+from scipy import stats, ndimage
 import matplotlib.pyplot as plt
 import os
 import re
 import time
 import glob
+import argparse
 from typing import Tuple, List, Dict, Optional
 from skimage import measure
+try:
+    from .conrec_extractor import CONRECExtractor, compare_extraction_methods
+    from .plic_extractor import PLICExtractor, AdvancedPLICExtractor, compare_plic_vs_conrec
+except ImportError:
+    # Fallback for direct script execution
+    from conrec_extractor import CONRECExtractor, compare_extraction_methods
+    from plic_extractor import PLICExtractor, AdvancedPLICExtractor, compare_plic_vs_conrec
+from scipy import fft
+
+# =================================================================
+# OPTIMIZATION: Interface Cache System
+# =================================================================
+
+class InterfaceCache:
+    """
+    OPTIMIZATION: Comprehensive cache for interface extraction results.
+    
+    Eliminates redundant interface extractions and spatial index creation
+    by storing all interface-related data in a single, reusable object.
+    """
+    
+    def __init__(self, primary_segments=None, contours=None, spatial_index=None, 
+                 bounding_box=None, grid_spacing=None, extraction_method='scikit-image'):
+        """Initialize interface cache with extracted data."""
+        self.primary_segments = primary_segments or []
+        self.contours = contours or {}
+        self.spatial_index = spatial_index
+        self.bounding_box = bounding_box
+        self.grid_spacing = grid_spacing
+        self.extraction_method = extraction_method
+        
+        # Metadata for diagnostics and optimization tracking
+        self.extraction_time = time.time()
+        self.segment_count = len(self.primary_segments)
+        self.total_contour_points = self._count_contour_points()
+        
+    def _count_contour_points(self):
+        """Count total points across all contour levels."""
+        total = 0
+        for level_contours in self.contours.values():
+            if level_contours:
+                for contour in level_contours:
+                    if hasattr(contour, 'shape'):
+                        total += contour.shape[0]  # numpy array
+                    else:
+                        total += len(contour)  # list
+        return total
+    
+    def get_segments_for_fractal(self):
+        """Get segments optimized for fractal analysis."""
+        return self.primary_segments
+    
+    def get_contours_for_mixing(self, method='dalziel'):
+        """Get contours optimized for specific mixing thickness calculation."""
+        if method == 'dalziel':
+            # Dalziel needs 0.05 and 0.95 level contours
+            return {
+                'lower_boundary': self.contours.get('lower_boundary', []),
+                'upper_boundary': self.contours.get('upper_boundary', []),
+                'interface': self.contours.get('interface', [])  # For fallback
+            }
+        elif method == 'geometric':
+            # Geometric needs 0.5 level contours
+            return {
+                'interface': self.contours.get('interface', [])
+            }
+        else:
+            # Statistical method doesn't need contours (uses grid data)
+            return {}
+    
+    def has_spatial_index(self):
+        """Check if spatial index is available for optimized box counting."""
+        return self.spatial_index is not None
+    
+    def has_segments(self):
+        """Check if primary segments are available for fractal analysis."""
+        return len(self.primary_segments) > 0
+    
+    def has_contours(self, level='interface'):
+        """Check if contours are available for specified level."""
+        return level in self.contours and len(self.contours[level]) > 0
 
 class RTAnalyzer:
     """Complete Rayleigh-Taylor simulation analyzer with fractal dimension calculation."""
-    
-    def __init__(self, output_dir="./rt_analysis"):
+
+    def __init__(self, output_dir="./rt_analysis", use_grid_optimization=False, no_titles=False,
+                 use_conrec=False, use_plic=False, debug=False):
         """Initialize the RT analyzer."""
         self.output_dir = output_dir
+        self.use_grid_optimization = use_grid_optimization
+        self.no_titles = no_titles
+        self.use_conrec = use_conrec
+        self.use_plic = use_plic
+        self.debug = debug
         os.makedirs(output_dir, exist_ok=True)
-        
+
+        # Add rectangular grid support
+        self.grid_shape = None  # Will store (ny, nx) or (n, n) for square
+        self.is_rectangular = False
+
+        # Initialize interface cache for optimization
+        self.interface_cache = {}
+        self.interface_value = 0.5  # Default interface level
+
         # Create fractal analyzer instance
         try:
-            from fractal_analyzer_v26 import FractalAnalyzer  # Updated to v26
-            self.fractal_analyzer = FractalAnalyzer()
-            print("Fractal analyzer v26 initialized successfully")
+            from fractal_analyzer import FractalAnalyzer
+            self.fractal_analyzer = FractalAnalyzer(no_titles=no_titles)
+            print(f"Fractal analyzer initialized (grid optimization: {'ENABLED' if use_grid_optimization else 'DISABLED'})")
         except ImportError as e:
-            print(f"Warning: fractal_analyzer_v26 module not found: {str(e)}")
-            print("Make sure fractal_analyzer_v26.py is in the same directory")
+            print(f"Warning: fractal_analyzer module not found: {str(e)}")
+            print("Make sure fractal_analyzer.py is in the same directory")
             self.fractal_analyzer = None
-    
+        
+        # Initialize PLIC extractor if requested
+        if self.use_plic:
+            try:
+                from .plic_extractor import AdvancedPLICExtractor
+                self.plic_extractor = AdvancedPLICExtractor(debug=debug)
+                print(f"PLIC extractor initialized - theoretical VOF interface reconstruction enabled")
+            except ImportError as e:
+                print(f"ERROR: Could not import PLIC extractor: {e}")
+                print("Make sure plic_extractor.py is in the fractal_analyzer/core/ directory")
+                self.plic_extractor = None
+                self.use_plic = False
+        else:
+            self.plic_extractor = None
+
+        # Initialize CONREC extractor if requested (and PLIC not enabled)
+        if self.use_conrec and not self.use_plic:
+            try:
+                self.conrec_extractor = CONRECExtractor(debug=debug)
+                print(f"CONREC extractor initialized - precision interface extraction enabled")
+            except ImportError as e:
+                print(f"ERROR: Could not import CONREC extractor: {e}")
+                self.conrec_extractor = None
+                self.use_conrec = False
+        else:
+            self.conrec_extractor = None
+
+        # Validation: Don't allow both CONREC and PLIC simultaneously
+        if self.use_conrec and self.use_plic:
+            print("WARNING: Both CONREC and PLIC enabled. PLIC will take precedence.")
+            self.use_conrec = False
+            print("CONREC disabled. Using PLIC for interface extraction.")
+
+    def auto_detect_resolution_from_vtk_filename(self, vtk_file):
+        """Enhanced resolution detection for both square and rectangular grids."""
+        import re
+        import os
+
+        basename = os.path.basename(vtk_file)
+
+        # Pattern for rectangular RT###x###-*.vtk files
+        rect_patterns = [
+            r'RT(\d+)x(\d+)',      # RT160x200-1234.vtk
+            r'(\d+)x(\d+)',        # 160x200-1234.vtk
+            r'RT(\d+)_(\d+)',      # RT160_200-1234.vtk
+        ]
+
+        # Try rectangular patterns first
+        for pattern in rect_patterns:
+            match = re.search(pattern, basename)
+            if match:
+                nx = int(match.group(1))
+                ny = int(match.group(2))
+                if nx != ny:  # Rectangular
+                    print(f"  Auto-detected rectangular resolution: {nx}×{ny}")
+                    self.grid_shape = (ny, nx)  # Store as (ny, nx) for array indexing
+                    self.is_rectangular = True
+                    return nx, ny
+                else:  # Square but in rectangular format
+                    print(f"  Auto-detected square resolution: {nx}×{ny}")
+                    self.grid_shape = (nx, nx)
+                    self.is_rectangular = False
+                    return nx, ny
+
+        # Pattern for square RT###-*.vtk files (backward compatibility)
+        square_pattern = r'RT(\d+)-'
+        match = re.search(square_pattern, basename)
+        if match:
+            n = int(match.group(1))
+            print(f"  Auto-detected square resolution from legacy format: {n}×{n}")
+            self.grid_shape = (n, n)
+            self.is_rectangular = False
+            return n, n
+
+        # Try to extract from directory path as fallback
+        dir_patterns = [r'(\d+)x(\d+)', r'(\d+)_(\d+)']
+        for pattern in dir_patterns:
+            dir_match = re.search(pattern, vtk_file)
+            if dir_match:
+                nx = int(dir_match.group(1))
+                ny = int(dir_match.group(2))
+                print(f"  Auto-detected resolution from path: {nx}×{ny}")
+                self.grid_shape = (ny, nx)
+                self.is_rectangular = (nx != ny)
+                return nx, ny
+
+        print(f"  Could not auto-detect resolution from: {basename}")
+        return None, None
+
     def read_vtk_file(self, vtk_file):
-        """Read VTK rectilinear grid file and extract only the VOF (F) data."""
+        """Enhanced VTK reader to extract velocity components AND VOF data."""
         with open(vtk_file, 'r') as f:
             lines = f.readlines()
         
@@ -44,7 +228,6 @@ class RTAnalyzer:
         x_coords = []
         y_coords = []
         
-        # Find coordinates
         for i, line in enumerate(lines):
             if "X_COORDINATES" in line:
                 parts = line.strip().split()
@@ -66,87 +249,804 @@ class RTAnalyzer:
                     j += 1
                 y_coords = np.array(coords_data)
         
-        # Extract scalar field data (F) only
-        f_data = None
-        
-        for i, line in enumerate(lines):
-            # Find VOF (F) data
-            if "SCALARS F" in line:
-                data_values = []
-                j = i + 2  # Skip the LOOKUP_TABLE line
-                while j < len(lines) and not lines[j].strip().startswith("SCALARS"):
-                    data_values.extend(list(map(float, lines[j].strip().split())))
-                    j += 1
-                f_data = np.array(data_values)
-                break
-        
         # Check if this is cell-centered data
         is_cell_data = any("CELL_DATA" in line for line in lines)
         
-        # For cell data, we need to adjust the grid
+        # Extract ALL scalar fields (F, u, v, and any others)
+        scalar_data = {}
+        
+        for i, line in enumerate(lines):
+            if line.strip().startswith("SCALARS"):
+                parts = line.strip().split()
+                if len(parts) >= 2:
+                    field_name = parts[1]  # F, u, v, etc.
+                    
+                    # Read the data values
+                    data_values = []
+                    j = i + 2  # Skip the LOOKUP_TABLE line
+                    while j < len(lines) and not lines[j].strip().startswith("SCALARS"):
+                        if lines[j].strip():  # Skip empty lines
+                            data_values.extend(list(map(float, lines[j].strip().split())))
+                        j += 1
+                    
+                    if data_values:
+                        scalar_data[field_name] = np.array(data_values)
+
+        # Handle coordinate system (cell vs node centered)
         if is_cell_data:
-            # The dimensions are one less than the coordinates in each direction
             nx_cells, ny_cells = nx-1, ny-1
-            
-            # Reshape the data
-            f_grid = f_data.reshape(ny_cells, nx_cells).T if f_data is not None else None
-            
-            # Create cell-centered coordinates
             x_cell = 0.5 * (x_coords[:-1] + x_coords[1:])
             y_cell = 0.5 * (y_coords[:-1] + y_coords[1:])
-            
-            # Create 2D meshgrid
             x_grid, y_grid = np.meshgrid(x_cell, y_cell)
-            x_grid = x_grid.T  # Transpose to match the data ordering
-            y_grid = y_grid.T
+            x_grid, y_grid = x_grid.T, y_grid.T
+            grid_shape = (nx_cells, ny_cells)
         else:
-            # For point data, use the coordinates directly
             x_grid, y_grid = np.meshgrid(x_coords, y_coords)
-            x_grid = x_grid.T
-            y_grid = y_grid.T
-            
-            # Reshape the data
-            f_grid = f_data.reshape(ny, nx).T if f_data is not None else None
+            x_grid, y_grid = x_grid.T, y_grid.T
+            grid_shape = (nx, ny)
         
-        # Extract simulation time from filename
+        # Reshape all scalar fields to 2D grids
+        reshaped_data = {}
+        for field_name, data in scalar_data.items():
+            if len(data) == grid_shape[0] * grid_shape[1]:
+                reshaped_data[field_name] = data.reshape(grid_shape[1], grid_shape[0]).T
+            else:
+                print(f"   WARNING: {field_name} size mismatch: {len(data)} vs expected {grid_shape[0] * grid_shape[1]}")
+        
+        # Extract simulation time
         time_match = re.search(r'(\d+)\.vtk$', os.path.basename(vtk_file))
         sim_time = float(time_match.group(1))/1000.0 if time_match else 0.0
         
-        # Create output dictionary with only needed fields
-        return {
+        # Create comprehensive output dictionary
+        result = {
             'x': x_grid,
             'y': y_grid,
-            'f': f_grid,
             'dims': (nx, ny, nz),
-            'time': sim_time
+            'time': sim_time,
+            'is_cell_data': is_cell_data
         }
-    
-    def extract_interface(self, f_grid, x_grid, y_grid, level=0.5):
-        """Extract the interface contour at level f=0.5 using marching squares algorithm."""
-        # Find contours
-        contours = measure.find_contours(f_grid.T, level)
         
-        # Convert to physical coordinates
-        physical_contours = []
-        for contour in contours:
-            x_physical = np.interp(contour[:, 1], np.arange(f_grid.shape[0]), x_grid[:, 0])
-            y_physical = np.interp(contour[:, 0], np.arange(f_grid.shape[1]), y_grid[0, :])
-            physical_contours.append(np.column_stack([x_physical, y_physical]))
+        # Add all available fields
+        result.update(reshaped_data)
         
-        return physical_contours
-    
-    def convert_contours_to_segments(self, contours):
-        """Convert contours to line segments format for fractal analysis."""
+        # Ensure we have at least F field for backward compatibility
+        if 'F' not in result and 'f' not in result:
+            print("   WARNING: No VOF field (F) found in VTK file")
+        else:
+            # Standardize field name for backward compatibility
+            if 'F' in result and 'f' not in result:
+                result['f'] = result['F']
+        
+        return result
+    # Step 2
+    def extract_interface(self, f_grid, x_grid, y_grid, level=0.5, extract_all_levels=True):
+        """
+        ENHANCED: Extract interface contour(s) with PLIC, CONREC, or scikit-image methods.
+        FIXED: Proper method priority handling.
+        """
+        if self.use_plic and self.plic_extractor is not None:
+            print(f"   Interface extraction method: PLIC")
+            return self._extract_interface_plic(f_grid, x_grid, y_grid, level, extract_all_levels)
+        elif self.use_conrec and self.conrec_extractor is not None:
+            print(f"   Interface extraction method: CONREC")
+            return self._extract_interface_conrec(f_grid, x_grid, y_grid, level, extract_all_levels)
+        else:
+            print(f"   Interface extraction method: scikit-image")
+            return self._extract_interface_skimage(f_grid, x_grid, y_grid, level, extract_all_levels)
+
+    def _extract_interface_plic(self, f_grid, x_grid, y_grid, level=0.5, extract_all_levels=True):
+        """Extract interface using PLIC algorithm with enhanced debugging."""
+        print(f"     PLIC: Starting interface extraction...")
+        if self.debug:
+            print(f"     DEBUG: F-field stats - min={np.min(f_grid):.3f}, max={np.max(f_grid):.3f}")
+            print(f"     DEBUG: Grid shape: {f_grid.shape}")
+
+        # Check if PLIC extractor is available
+        if self.plic_extractor is None:
+            print(f"     ERROR: PLIC extractor is None!")
+            raise RuntimeError("PLIC extractor not initialized")
+
+        try:
+            if extract_all_levels:
+                # PLIC doesn't have built-in multi-level support, so we'll extract each level separately
+                mixing_levels = {
+                    'lower_boundary': 0.05,   # Lower mixing zone boundary
+                    'interface': 0.5,         # Primary interface
+                    'upper_boundary': 0.95    # Upper mixing zone boundary
+                }
+
+                all_contours = {}
+                total_segments = 0
+
+                for level_name, level_value in mixing_levels.items():
+                    try:
+                        print(f"     PLIC: Extracting {level_name} (F={level_value:.2f})")
+
+                        # For PLIC, we need to modify the volume fraction field to center around each level
+                        if level_value == 0.5:
+                            # Use original field for interface
+                            f_for_plic = f_grid
+                        else:
+                            # Rescale field to center around the desired level
+                            f_centered = f_grid - 0.5 + level_value
+                            f_for_plic = np.clip(f_centered, 0.0, 1.0)
+
+                        # Extract using PLIC with error handling
+                        segments = self.plic_extractor.extract_interface_plic(f_for_plic, x_grid, y_grid)
+                        print(f"       PLIC extraction successful, got {len(segments)} segments")
+
+                        # Convert segments to contour format for compatibility
+                        contour_paths = self._segments_to_contour_paths(segments)
+                        all_contours[level_name] = contour_paths
+
+                        segment_count = len(segments)
+                        total_segments += segment_count
+                        print(f"     {level_name}: {segment_count} segments → {len(contour_paths)} paths")
+
+                    except Exception as level_error:
+                        print(f"     PLIC ERROR for {level_name}: {level_error}")
+                        all_contours[level_name] = []
+
+                print(f"     PLIC total: {total_segments} segments across all levels")
+                return all_contours
+
+            else:
+                # Extract single level
+                print(f"     PLIC: Extracting single level F={level:.3f}")
+                segments = self.plic_extractor.extract_interface_plic(f_grid, x_grid, y_grid)
+                print(f"       PLIC extraction successful, got {len(segments)} segments")
+
+                # Convert to contour format for compatibility
+                contour_paths = self._segments_to_contour_paths(segments)
+                print(f"     PLIC: {len(segments)} segments → {len(contour_paths)} paths")
+                return contour_paths
+
+        except Exception as outer_error:
+            print(f"     OUTER PLIC ERROR: {outer_error}")
+            print(f"     Falling back to scikit-image method...")
+            return self._extract_interface_skimage(f_grid, x_grid, y_grid, level if not extract_all_levels else 0.5, extract_all_levels)
+
+    def _extract_interface_conrec(self, f_grid, x_grid, y_grid, level=0.5, extract_all_levels=True):
+        """Extract interface using CONREC algorithm."""
+        f_for_contour = f_grid
+
+        if extract_all_levels:
+            # Extract all three mixing zone levels
+            mixing_levels = [0.05, 0.5, 0.95]  # lower_boundary, interface, upper_boundary
+
+            print(f"     CONREC: Extracting multiple levels: {mixing_levels}")
+            level_results = self.conrec_extractor.extract_multiple_levels(
+                f_for_contour, x_grid, y_grid, mixing_levels
+            )
+
+            # Convert segments to contour format for compatibility
+            all_contours = {}
+            total_segments = 0
+
+            for level_name, segments in level_results.items():
+                # Convert segments back to contour paths for compatibility
+                contour_paths = self._segments_to_contour_paths(segments)
+                all_contours[level_name] = contour_paths
+
+                segment_count = len(segments)
+                total_segments += segment_count
+                print(f"     {level_name}: {segment_count} segments → {len(contour_paths)} paths")
+
+            print(f"     CONREC total: {total_segments} segments across all levels")
+            return all_contours
+
+        else:
+            # Extract single level
+            print(f"     CONREC: Extracting single level F={level:.3f}")
+            segments = self.conrec_extractor.extract_interface_conrec(
+                f_for_contour, x_grid, y_grid, level
+            )
+
+            # Convert to contour format for compatibility
+            contour_paths = self._segments_to_contour_paths(segments)
+
+            print(f"     CONREC: {len(segments)} segments → {len(contour_paths)} paths")
+            return contour_paths
+
+    def _extract_interface_skimage(self, f_grid, x_grid, y_grid, level=0.5, extract_all_levels=True):
+        """Extract interface using scikit-image (original method) - COMPLETE VERSION."""
+        # Check for binary data
+        unique_vals = np.unique(f_grid)
+        is_binary = len(unique_vals) <= 10
+
+        if is_binary:
+            print(f"     Binary VOF detected: {unique_vals}")
+            print(f"     Applying smoothing for contour interpolation...")
+
+            # For binary VOF data, apply gentle smoothing to create interpolation zones
+            f_smoothed = ndimage.gaussian_filter(f_grid.astype(float), sigma=0.8)
+            print(f"     After smoothing: min={np.min(f_smoothed):.3f}, max={np.max(f_smoothed):.3f}")
+            f_for_contour = f_smoothed
+        else:
+            print(f"     Continuous F-field detected, using direct contouring")
+            f_for_contour = f_grid
+
+        if extract_all_levels:
+            # Extract all three mixing zone levels
+            mixing_levels = {
+                'lower_boundary': 0.05,   # Lower mixing zone boundary
+                'interface': 0.5,         # Primary interface
+                'upper_boundary': 0.95    # Upper mixing zone boundary
+            }
+
+            all_contours = {}
+            total_segments = 0
+
+            for level_name, level_value in mixing_levels.items():
+                try:
+                    contours = measure.find_contours(f_for_contour.T, level_value)
+
+                    # Convert to physical coordinates
+                    physical_contours = []
+                    for contour in contours:
+                        if len(contour) > 1:  # Skip single-point contours
+                            x_physical = np.interp(contour[:, 1], np.arange(f_grid.shape[0]), x_grid[:, 0])
+                            y_physical = np.interp(contour[:, 0], np.arange(f_grid.shape[1]), y_grid[0, :])
+                            physical_contours.append(np.column_stack([x_physical, y_physical]))
+
+                    all_contours[level_name] = physical_contours
+
+                    # Count segments for this level
+                    level_segments = sum(len(contour) - 1 for contour in physical_contours if len(contour) > 1)
+                    total_segments += level_segments
+
+                    print(f"     F={level_value:.2f} ({level_name}): {len(physical_contours)} paths, {level_segments} segments")
+
+                except Exception as e:
+                    print(f"     F={level_value:.2f} ({level_name}): ERROR - {e}")
+                    all_contours[level_name] = []
+
+            print(f"     Total segments across all levels: {total_segments}")
+
+            # If primary interface (F=0.5) failed, try alternative approaches
+            if len(all_contours.get('interface', [])) == 0:
+                print(f"     Primary interface (F=0.5) failed, trying adaptive approach...")
+                all_contours['interface'] = self._extract_interface_adaptive(f_for_contour, x_grid, y_grid)
+
+            return all_contours
+
+        else:
+            # Extract single level (backward compatibility)
+            try:
+                contours = measure.find_contours(f_for_contour.T, level)
+                print(f"     Found {len(contours)} contour paths for F={level:.2f}")
+
+                # Convert to physical coordinates
+                physical_contours = []
+                total_segments = 0
+
+                for i, contour in enumerate(contours):
+                    if len(contour) > 1:
+                        x_physical = np.interp(contour[:, 1], np.arange(f_grid.shape[0]), x_grid[:, 0])
+                        y_physical = np.interp(contour[:, 0], np.arange(f_grid.shape[1]), y_grid[0, :])
+                        physical_contours.append(np.column_stack([x_physical, y_physical]))
+
+                        segments_in_path = len(contour) - 1
+                        total_segments += segments_in_path
+
+                print(f"     Total segments: {total_segments}")
+
+                # If we got very few segments, try adaptive approach
+                if total_segments < 10:
+                    print(f"     Too few segments ({total_segments}), trying adaptive approach...")
+                    adaptive_contours = self._extract_interface_adaptive(f_for_contour, x_grid, y_grid)
+                    if adaptive_contours:
+                        return adaptive_contours
+
+                return physical_contours
+
+            except Exception as e:
+                print(f"     ERROR in find_contours: {e}")
+                print(f"     Falling back to adaptive method...")
+                return self._extract_interface_adaptive(f_for_contour, x_grid, y_grid)
+
+    def _extract_interface_adaptive(self, f_grid, x_grid, y_grid):
+        """Adaptive interface extraction when standard contouring fails."""
+        print(f"       Trying adaptive interface extraction...")
+
+        # Method 1: Try multiple contour levels
+        test_levels = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+        best_contours = []
+        best_count = 0
+        best_level = 0.5
+
+        for test_level in test_levels:
+            try:
+                contours = measure.find_contours(f_grid.T, test_level)
+
+                # Convert to physical coordinates
+                physical_contours = []
+                for contour in contours:
+                    if len(contour) > 1:
+                        x_physical = np.interp(contour[:, 1], np.arange(f_grid.shape[0]), x_grid[:, 0])
+                        y_physical = np.interp(contour[:, 0], np.arange(f_grid.shape[1]), y_grid[0, :])
+                        physical_contours.append(np.column_stack([x_physical, y_physical]))
+
+                # Count total segments
+                total_segments = sum(len(contour) - 1 for contour in physical_contours if len(contour) > 1)
+
+                if total_segments > best_count:
+                    best_count = total_segments
+                    best_contours = physical_contours
+                    best_level = test_level
+
+            except:
+                continue
+
+        if best_count > 0:
+            print(f"       Best adaptive level: F={best_level:.1f} with {best_count} segments")
+            return best_contours
+
+        print(f"       All adaptive methods failed")
+        return []
+
+    def _segments_to_contour_paths(self, segments):
+        """Convert line segments back to contour paths for compatibility."""
+        if not segments:
+            return []
+
+        # For now, convert each segment to a 2-point contour
+        # More sophisticated path reconstruction could be added later
+        contour_paths = []
+
+        for (x1, y1), (x2, y2) in segments:
+            contour_path = np.array([[x1, y1], [x2, y2]])
+            contour_paths.append(contour_path)
+
+        return contour_paths
+
+    def convert_contours_to_segments(self, contours_input):
+        """
+        ENHANCED: Convert contours to line segments, handles both single-level and multi-level input.
+        """
+        if isinstance(contours_input, dict):
+            # Multi-level input - use primary interface (F=0.5)
+            if 'interface' in contours_input and contours_input['interface']:
+                contours = contours_input['interface']
+                print(f"   Using primary interface contours: {len(contours)} paths")
+            else:
+                # Fallback to any available level
+                for level_name, level_contours in contours_input.items():
+                    if level_contours:
+                        contours = level_contours
+                        print(f"   Using {level_name} contours as fallback: {len(contours)} paths")
+                        break
+                else:
+                    print(f"   No contours available in any level")
+                    return []
+        else:
+            # Single-level input (backward compatibility)
+            contours = contours_input
+
+        # Convert contours to segments
         segments = []
-        
+
         for contour in contours:
+            # Each contour is a numpy array of points: [[x1,y1], [x2,y2], ...]
             for i in range(len(contour) - 1):
                 x1, y1 = contour[i]
                 x2, y2 = contour[i+1]
                 segments.append(((x1, y1), (x2, y2)))
-        
+
+        print(f"   Converted to {len(segments)} line segments")
         return segments
-    
+
+    # STEP 3
+    def compute_fractal_dimension(self, data, min_box_size=None):
+        """Compute fractal dimension of the interface using basic box counting."""
+        if self.fractal_analyzer is None:
+            print("Fractal analyzer not available. Skipping fractal dimension calculation.")
+            return {
+                'dimension': np.nan,
+                'error': np.nan,
+                'r_squared': np.nan
+            }
+
+        # Extract contours - ENHANCED VERSION
+        contours = self.extract_interface(data['f'], data['x'], data['y'], extract_all_levels=False)
+
+        # Convert to segments - ENHANCED VERSION
+        segments = self.convert_contours_to_segments(contours)
+
+        if not segments:
+            print("No interface segments found.")
+            return {
+                'dimension': np.nan,
+                'error': np.nan,
+                'r_squared': np.nan
+            }
+
+        print(f"Found {len(segments)} interface segments")
+
+        # PHYSICS-BASED AUTO-ESTIMATION
+        if min_box_size is None:
+            min_box_size = self.fractal_analyzer.estimate_min_box_size_from_segments(segments)
+            print(f"Auto-estimated min_box_size: {min_box_size:.8f}")
+        else:
+            print(f"Using provided min_box_size: {min_box_size:.8f}")
+
+        try:
+            # Use the basic analyze_linear_region method
+            results = self.fractal_analyzer.analyze_linear_region(
+                segments,
+                fractal_type=None,  # No known theoretical value for RT
+                plot_results=False,  # Don't create plots here
+                plot_boxes=False,
+                trim_boundary=0,
+                box_size_factor=1.5,
+                use_grid_optimization=self.use_grid_optimization,
+                return_box_data=True,
+                min_box_size=min_box_size
+            )
+
+            # Unpack results - analyze_linear_region returns tuple when return_box_data=True
+            windows, dims, errs, r2s, optimal_window, optimal_dimension, box_sizes, box_counts, bounding_box = results
+
+            # Get error for the optimal window
+            optimal_idx = np.where(np.array(windows) == optimal_window)[0][0]
+            error = errs[optimal_idx]
+            r_squared = r2s[optimal_idx]
+
+            print(f"Fractal dimension: {optimal_dimension:.6f} ± {error:.6f}, R² = {r_squared:.6f}")
+            print(f"Window size: {optimal_window}")
+
+            return {
+                'dimension': optimal_dimension,
+                'error': error,
+                'r_squared': r_squared,
+                'window_size': optimal_window,
+                'box_sizes': box_sizes,
+                'box_counts': box_counts,
+                'segments': segments
+            }
+
+        except Exception as e:
+            print(f"Error in fractal dimension calculation: {str(e)}")
+            return {
+                'dimension': np.nan,
+                'error': np.nan,
+                'r_squared': np.nan
+            }
+
+    # =================================================================
+    # OPTIMIZATION METHODS - Step 3 Core Optimization
+    # =================================================================
+
+    def _generate_cache_key(self, vtk_file_path):
+        """Generate a unique cache key for a VTK file."""
+        import os
+        import hashlib
+
+        try:
+            stat = os.stat(vtk_file_path)
+            file_info = f"{vtk_file_path}_{stat.st_mtime}_{stat.st_size}_{self.interface_value}"
+            cache_key = hashlib.md5(file_info.encode()).hexdigest()
+            return cache_key
+        except OSError:
+            return hashlib.md5(vtk_file_path.encode()).hexdigest()
+
+    def _load_vtk_data(self, vtk_file_path):
+        """Load VTK data from file."""
+        try:
+            return self.read_vtk_file(vtk_file_path)
+        except Exception as e:
+            print(f"Error loading VTK file {vtk_file_path}: {str(e)}")
+            return None
+
+    def _extract_interface_contour(self, vtk_data, interface_value):
+        """Extract interface contour using existing method."""
+        try:
+            contours = self.extract_interface(
+                vtk_data['f'], vtk_data['x'], vtk_data['y'],
+                level=interface_value, extract_all_levels=False
+            )
+            interface_points = []
+            for contour in contours:
+                for point in contour:
+                    interface_points.append((float(point[0]), float(point[1])))
+            return interface_points
+        except Exception as e:
+            print(f"Error extracting interface: {str(e)}")
+            return []
+
+    def _compute_curvature_statistics(self, interface_points):
+        """Compute curvature statistics for interface."""
+        try:
+            if len(interface_points) < 3:
+                return {'mean_curvature': 0, 'max_curvature': 0, 'curvature_std': 0}
+
+            curvatures = []
+            for i in range(1, len(interface_points) - 1):
+                p1, p2, p3 = interface_points[i-1], interface_points[i], interface_points[i+1]
+                dx1, dy1 = p2[0] - p1[0], p2[1] - p1[1]
+                dx2, dy2 = p3[0] - p2[0], p3[1] - p2[1]
+                cross = dx1 * dy2 - dy1 * dx2
+                norm1 = (dx1**2 + dy1**2)**0.5
+                norm2 = (dx2**2 + dy2**2)**0.5
+                if norm1 > 0 and norm2 > 0:
+                    curvature = cross / (norm1 * norm2)
+                    curvatures.append(abs(curvature))
+
+            if curvatures:
+                return {
+                    'mean_curvature': sum(curvatures) / len(curvatures),
+                    'max_curvature': max(curvatures),
+                    'curvature_std': (sum((c - sum(curvatures)/len(curvatures))**2 for c in curvatures) / len(curvatures))**0.5
+                }
+            else:
+                return {'mean_curvature': 0, 'max_curvature': 0, 'curvature_std': 0}
+
+        except Exception as e:
+            print(f"Error computing curvature: {str(e)}")
+            return {'error': str(e)}
+
+    def _compute_wavelength_spectrum(self, interface_points):
+        """Compute wavelength spectrum for interface."""
+        try:
+            if len(interface_points) < 4:
+                return {'dominant_wavelength': 0, 'wavelength_count': 0}
+
+            # Extract y-coordinates as function of x
+            x_coords = [p[0] for p in interface_points]
+            y_coords = [p[1] for p in interface_points]
+
+            # Simple FFT analysis
+            y_fft = np.fft.fft(y_coords)
+            freqs = np.fft.fftfreq(len(y_coords))
+
+            # Find dominant frequency
+            power = np.abs(y_fft)**2
+            dominant_freq_idx = np.argmax(power[1:len(power)//2]) + 1
+            dominant_freq = freqs[dominant_freq_idx]
+
+            if dominant_freq != 0:
+                dominant_wavelength = 1.0 / abs(dominant_freq)
+            else:
+                dominant_wavelength = max(x_coords) - min(x_coords)
+
+            return {
+                'dominant_wavelength': dominant_wavelength,
+                'wavelength_count': len([f for f in freqs[:len(freqs)//2] if abs(f) > 0.01])
+            }
+
+        except Exception as e:
+            print(f"Error computing wavelength spectrum: {str(e)}")
+            return {'error': str(e)}
+
+    def _compute_box_counting_dimension(self, interface_points):
+        """Compute box counting fractal dimension from interface points."""
+        try:
+            if not interface_points:
+                return np.nan
+
+            # Convert to segments format for fractal analyzer
+            segments = []
+            for i in range(len(interface_points) - 1):
+                p1 = interface_points[i]
+                p2 = interface_points[i + 1]
+                segments.append((p1, p2))
+
+            if not segments:
+                return np.nan
+
+            # Use fractal analyzer if available
+            if self.fractal_analyzer is not None:
+                results = self.fractal_analyzer.analyze_linear_region(
+                    segments,
+                    fractal_type=None,
+                    plot_results=False,
+                    plot_boxes=False,
+                    trim_boundary=0,
+                    box_size_factor=1.5,
+                    use_grid_optimization=self.use_grid_optimization,
+                    return_box_data=True,
+                    min_box_size=None
+                )
+
+                windows, dims, errs, r2s, optimal_window, optimal_dimension, box_sizes, box_counts, bounding_box = results
+                return optimal_dimension
+            else:
+                print("Warning: Fractal analyzer not available")
+                return np.nan
+
+        except Exception as e:
+            print(f"Error computing fractal dimension: {str(e)}")
+            return np.nan
+
+    def _extract_interface_comprehensive(self, vtk_file_path):
+        """
+        Single-pass comprehensive interface extraction.
+        Extracts ALL interface data needed for analysis in one CONREC call.
+        """
+        import time
+        start_time = time.time()
+
+        # Load VTK data
+        vtk_data = self._load_vtk_data(vtk_file_path)
+        if vtk_data is None:
+            return None
+
+        # Single CONREC call for base interface
+        base_interface = self._extract_interface_contour(vtk_data, self.interface_value)
+        if not base_interface:
+            print(f"Warning: No interface found in {vtk_file_path}")
+            return None
+
+        # Calculate bounds for metadata
+        x_coords = [pt[0] for pt in base_interface]
+        y_coords = [pt[1] for pt in base_interface]
+        bounds = (min(x_coords), max(x_coords), min(y_coords), max(y_coords))
+
+        # Generate smoothed interface (reuse base data with smoothing)
+        smoothed_interface = self._apply_smoothing_filter(base_interface)
+
+        # Generate perturbed interfaces (if needed for analysis)
+        perturbed_interfaces = []
+        if hasattr(self, 'perturbation_levels') and self.perturbation_levels:
+            for level in self.perturbation_levels:
+                perturbed = self._apply_perturbation(base_interface, level)
+                perturbed_interfaces.append(perturbed)
+
+        extraction_time = time.time() - start_time
+
+        # Package comprehensive results
+        comprehensive_data = {
+            'base_interface': base_interface,
+            'smoothed_interface': smoothed_interface,
+            'perturbed_interfaces': perturbed_interfaces,
+            'metadata': {
+                'file_path': vtk_file_path,
+                'extraction_time': extraction_time,
+                'point_count': len(base_interface),
+                'bounds': bounds
+            }
+        }
+
+        # Cache the comprehensive data
+        cache_key = self._generate_cache_key(vtk_file_path)
+        self.interface_cache[cache_key] = comprehensive_data
+
+        return comprehensive_data
+
+    def _apply_smoothing_filter(self, interface_points, window_size=5):
+        """Apply smoothing filter to interface points for more stable analysis."""
+        if len(interface_points) < window_size:
+            return interface_points.copy()
+
+        smoothed = []
+        half_window = window_size // 2
+
+        for i in range(len(interface_points)):
+            # Define window bounds
+            start_idx = max(0, i - half_window)
+            end_idx = min(len(interface_points), i + half_window + 1)
+
+            # Average coordinates in window
+            window_points = interface_points[start_idx:end_idx]
+            avg_x = sum(pt[0] for pt in window_points) / len(window_points)
+            avg_y = sum(pt[1] for pt in window_points) / len(window_points)
+
+            smoothed.append((avg_x, avg_y))
+
+        return smoothed
+
+    def _apply_perturbation(self, interface_points, perturbation_level=0.1):
+        """Apply controlled perturbation to interface for sensitivity analysis."""
+        import random
+
+        # Calculate interface scale for perturbation normalization
+        x_coords = [pt[0] for pt in interface_points]
+        y_coords = [pt[1] for pt in interface_points]
+        x_scale = max(x_coords) - min(x_coords)
+        y_scale = max(y_coords) - min(y_coords)
+
+        perturbation_amplitude = perturbation_level * min(x_scale, y_scale)
+
+        perturbed = []
+        for i, (x, y) in enumerate(interface_points):
+            # Add controlled random perturbation
+            dx = (random.random() - 0.5) * perturbation_amplitude
+            dy = (random.random() - 0.5) * perturbation_amplitude
+
+            perturbed.append((x + dx, y + dy))
+
+        return perturbed
+
+    def analyze_vtk_file(self, vtk_file_path, analysis_types=None):
+        """
+        OPTIMIZED: Single-pass analysis with comprehensive interface extraction.
+        Eliminates redundant CONREC calls by extracting all needed interface data once.
+        """
+        import time
+
+        if analysis_types is None:
+            analysis_types = ['fractal_dim', 'curvature', 'wavelength']
+
+        print(f"\n🚀 OPTIMIZED Analysis: {vtk_file_path}")
+        analysis_start = time.time()
+
+        # Check cache first
+        cache_key = self._generate_cache_key(vtk_file_path)
+        cached_data = self.interface_cache.get(cache_key)
+
+        if cached_data:
+            print(f"✅ Using cached interface data")
+            interface_data = cached_data
+        else:
+            print(f"🔄 Extracting comprehensive interface data...")
+            interface_data = self._extract_interface_comprehensive(vtk_file_path)
+            if interface_data is None:
+                return None
+
+        # Initialize results with metadata
+        results = {
+            'file_path': vtk_file_path,
+            'interface_extraction_time': interface_data['metadata']['extraction_time'],
+            'interface_point_count': interface_data['metadata']['point_count'],
+            'interface_bounds': interface_data['metadata']['bounds'],
+            'analysis_types_performed': analysis_types
+        }
+
+        # Perform requested analyses using pre-extracted data
+        base_interface = interface_data['base_interface']
+        smoothed_interface = interface_data['smoothed_interface']
+
+        if 'fractal_dim' in analysis_types:
+            print("  📐 Computing fractal dimension...")
+            fractal_start = time.time()
+
+            # Use smoothed interface for more stable fractal calculation
+            fractal_dim = self._compute_box_counting_dimension(smoothed_interface)
+            results['fractal_dimension'] = fractal_dim
+            results['fractal_computation_time'] = time.time() - fractal_start
+
+        if 'curvature' in analysis_types:
+            print("  📏 Computing curvature analysis...")
+            curvature_start = time.time()
+
+            curvature_stats = self._compute_curvature_statistics(smoothed_interface)
+            results['curvature_analysis'] = curvature_stats
+            results['curvature_computation_time'] = time.time() - curvature_start
+
+        if 'wavelength' in analysis_types:
+            print("  🌊 Computing wavelength analysis...")
+            wavelength_start = time.time()
+
+            wavelength_stats = self._compute_wavelength_spectrum(base_interface)
+            results['wavelength_analysis'] = wavelength_stats
+            results['wavelength_computation_time'] = time.time() - wavelength_start
+
+        if 'perturbation' in analysis_types and interface_data['perturbed_interfaces']:
+            print("  🔀 Computing perturbation analysis...")
+            perturbation_start = time.time()
+
+            perturbation_results = []
+            for i, perturbed_interface in enumerate(interface_data['perturbed_interfaces']):
+                perturb_fractal = self._compute_box_counting_dimension(perturbed_interface)
+                perturbation_results.append({
+                    'perturbation_level': i,
+                    'fractal_dimension': perturb_fractal
+                })
+
+            results['perturbation_analysis'] = perturbation_results
+            results['perturbation_computation_time'] = time.time() - perturbation_start
+
+        total_time = time.time() - analysis_start
+        results['total_analysis_time'] = total_time
+
+        print(f"✅ OPTIMIZED Analysis complete: {total_time:.2f}s")
+        print(f"   Interface extraction: {interface_data['metadata']['extraction_time']:.2f}s")
+        print(f"   Points processed: {interface_data['metadata']['point_count']}")
+
+        return results
+
+    # Step 4
+
     def find_initial_interface(self, data):
         """Find the initial interface position (y=1.0 for RT)."""
         f_avg = np.mean(data['f'], axis=0)
@@ -155,7 +1055,7 @@ class RTAnalyzer:
         # Find where f crosses 0.5
         idx = np.argmin(np.abs(f_avg - 0.5))
         return y_values[idx]
-    
+
     def compute_mixing_thickness(self, data, h0, method='geometric'):
         """Compute mixing layer thickness using different methods."""
         if method == 'geometric':
@@ -168,11 +1068,19 @@ class RTAnalyzer:
             
             for contour in contours:
                 y_coords = contour[:, 1]
-                ht = max(ht, np.max(y_coords - h0))
-                hb = max(hb, np.max(h0 - y_coords))
+                # Calculate displacements from initial interface
+                y_displacements = y_coords - h0
+                
+                # Upper mixing thickness (positive displacements)
+                if np.any(y_displacements > 0):
+                    ht = max(ht, np.max(y_displacements[y_displacements > 0]))
+                
+                # Lower mixing thickness (negative displacements, made positive)
+                if np.any(y_displacements < 0):
+                    hb = max(hb, np.max(-y_displacements[y_displacements < 0]))
             
             return {'ht': ht, 'hb': hb, 'h_total': ht + hb, 'method': 'geometric'}
-            
+        
         elif method == 'statistical':
             # Use concentration thresholds to define mixing zone
             f_avg = np.mean(data['f'], axis=0)
@@ -199,240 +1107,426 @@ class RTAnalyzer:
             hb = max(0, h0 - y_lower)
             
             return {'ht': ht, 'hb': hb, 'h_total': ht + hb, 'method': 'statistical'}
-        
+
         elif method == 'dalziel':
-            # Dalziel-style concentration-based mixing thickness
-            # Following Dalziel et al. (1999) methodology
-            f_avg = np.mean(data['f'], axis=0)  # Horizontal average
-            y_values = data['y'][0, :]
-            
-            # Use concentration thresholds following Dalziel et al.
-            # They mention using thresholds to define mixing zone boundaries
-            lower_threshold = 0.05  # 5% threshold (heavy fluid in light region)
-            upper_threshold = 0.95  # 95% threshold (light fluid in heavy region)
-            
-            # Find mixing zone boundaries
-            # Upper boundary: first point where concentration drops to upper_threshold
-            upper_idx = np.where(f_avg <= upper_threshold)[0]
-            # Lower boundary: last point where concentration rises to lower_threshold  
-            lower_idx = np.where(f_avg >= lower_threshold)[0]
-            
-            if len(upper_idx) > 0 and len(lower_idx) > 0:
-                y_upper = y_values[upper_idx[0]]   # First point below 95%
-                y_lower = y_values[lower_idx[-1]]  # Last point above 5%
-                
-                # Calculate mixing layer thicknesses relative to initial interface
-                ht = max(0, y_upper - h0)  # Upper mixing thickness
-                hb = max(0, h0 - y_lower)  # Lower mixing thickness
-                h_total = y_upper - y_lower  # Total mixing zone width
-                
-                # Additional Dalziel-style diagnostics
-                # Mixing zone center of mass
-                mixing_region = (f_avg >= lower_threshold) & (f_avg <= upper_threshold)
-                if np.any(mixing_region):
-                    y_center = np.average(y_values[mixing_region], weights=f_avg[mixing_region])
-                else:
-                    y_center = h0
-                
-                # Mixing efficiency (fraction of domain that is mixed)
-                mixing_fraction = np.sum(mixing_region) / len(f_avg)
-                
+            return self.compute_mixing_thickness_dalziel_correct(data, h0)
+
+        elif method == 'three_level':
+            # NEW: Use the three-level contour extraction
+            contours_dict = self.extract_interface(data['f'], data['x'], data['y'], extract_all_levels=True)
+            return self.get_mixing_zone_thickness(contours_dict, h0)
+
+    def get_mixing_zone_thickness(self, contours_dict, h0=0.5):
+        """
+        Calculate mixing zone thickness from the three extracted contour levels.
+        """
+        if not isinstance(contours_dict, dict):
+            print("Warning: get_mixing_zone_thickness requires multi-level contours")
+            return {'ht': 0, 'hb': 0, 'h_total': 0}
+        
+        # Extract Y coordinates from each level
+        y_coords = {}
+        
+        for level_name, contours in contours_dict.items():
+            if contours:
+                all_y = []
+                for contour in contours:
+                    all_y.extend(contour[:, 1])  # Y coordinates
+                y_coords[level_name] = all_y
             else:
-                # No clear mixing zone found
-                ht = hb = h_total = y_center = 0
-                mixing_fraction = 0
+                y_coords[level_name] = []
+        
+        # Calculate mixing zone extent
+        try:
+            # Upper mixing thickness: how far upper boundary extends above h0
+            if y_coords.get('upper_boundary'):
+                y_upper_max = max(y_coords['upper_boundary'])
+                ht = max(0, y_upper_max - h0)
+            else:
+                ht = 0
+            
+            # Lower mixing thickness: how far lower boundary extends below h0
+            if y_coords.get('lower_boundary'):
+                y_lower_min = min(y_coords['lower_boundary'])
+                hb = max(0, h0 - y_lower_min)
+            else:
+                hb = 0
+            
+            h_total = ht + hb
+            
+            print(f"   Mixing zone thickness: ht={ht:.6f}, hb={hb:.6f}, total={h_total:.6f}")
             
             return {
-                'ht': ht, 
+                'ht': ht,
                 'hb': hb, 
                 'h_total': h_total,
-                'y_center': y_center,
+                'method': 'three_level_contours'
+            }
+            
+        except Exception as e:
+            print(f"Error calculating mixing thickness: {e}")
+            return {'ht': 0, 'hb': 0, 'h_total': 0}
+
+    def find_concentration_crossing(self, f_profile, y_profile, target_concentration):
+        """
+        Find y-position where concentration profile crosses target value using interpolation.
+        """
+        # Find indices where profile crosses the target
+        diff = f_profile - target_concentration
+        sign_changes = np.diff(np.sign(diff))
+
+        crossings = []
+        crossing_indices = np.where(sign_changes != 0)[0]
+
+        for i in crossing_indices:
+            # Linear interpolation between points i and i+1
+            y1, y2 = y_profile[i], y_profile[i+1]
+            f1, f2 = f_profile[i], f_profile[i+1]
+            
+            # Interpolate to find exact crossing point
+            if f2 != f1:  # Avoid division by zero
+                y_cross = y1 + (target_concentration - f1) * (y2 - y1) / (f2 - f1)
+                crossings.append(y_cross)
+
+        return crossings
+
+    def compute_mixing_thickness_dalziel_correct(self, data, h0):
+        """
+        Correct Dalziel mixing thickness implementation following JFM 1999 Equation 7.
+        """
+        print(f"DEBUG: Computing Dalziel mixing thickness (CORRECTED)")
+
+        # Horizontal average (along-tank averaging) - following Dalziel notation C̄(z)
+        f_avg = np.mean(data['f'], axis=0)  # Average over x (first axis)
+        y_values = data['y'][0, :]  # y-coordinates along first row
+
+        print(f"DEBUG: f_avg shape: {f_avg.shape}")
+        print(f"DEBUG: y_values shape: {y_values.shape}")
+        print(f"DEBUG: f_avg range: [{np.min(f_avg):.3f}, {np.max(f_avg):.3f}]")
+        print(f"DEBUG: y_values range: [{np.min(y_values):.3f}, {np.max(y_values):.3f}]")
+        print(f"DEBUG: h0 = {h0:.6f}")
+
+        # Dalziel thresholds
+        lower_threshold = 0.05  # 5% threshold for h_{1,0}
+        upper_threshold = 0.95  # 95% threshold for h_{1,1}
+
+        # Find exact crossing points using interpolation
+        try:
+            crossings_005 = self.find_concentration_crossing(f_avg, y_values, lower_threshold)
+            crossings_095 = self.find_concentration_crossing(f_avg, y_values, upper_threshold)
+            
+            print(f"DEBUG: Found {len(crossings_005)} crossings at f=0.05: {crossings_005}")
+            print(f"DEBUG: Found {len(crossings_095)} crossings at f=0.95: {crossings_095}")
+            
+        except Exception as e:
+            print(f"ERROR in crossing detection: {e}")
+            return {
+                'ht': 0, 'hb': 0, 'h_total': 0,
+                'h_10': None, 'h_11': None,
+                'method': 'dalziel_error',
+                'error': str(e)
+            }
+
+        h_10 = None  # Lower boundary position
+        h_11 = None  # Upper boundary position
+
+        # Select appropriate crossings
+        if crossings_005:
+            if len(crossings_005) == 1:
+                h_10 = crossings_005[0]
+            else:
+                # Multiple crossings - select the one that makes physical sense
+                valid_crossings = [c for c in crossings_005 if c <= h0]  # Below initial interface
+                if valid_crossings:
+                    h_10 = max(valid_crossings)  # Highest crossing below h0
+                else:
+                    h_10 = min(crossings_005)  # Fallback to lowest crossing
+            
+            print(f"DEBUG: Selected h_10 = {h_10:.6f} (f=0.05 crossing)")
+
+        if crossings_095:
+            if len(crossings_095) == 1:
+                h_11 = crossings_095[0]
+            else:
+                # Multiple crossings - select the one that makes physical sense
+                valid_crossings = [c for c in crossings_095 if c >= h0]  # Above initial interface
+                if valid_crossings:
+                    h_11 = min(valid_crossings)  # Lowest crossing above h0
+                else:
+                    h_11 = max(crossings_095)  # Fallback to highest crossing
+            
+            print(f"DEBUG: Selected h_11 = {h_11:.6f} (f=0.95 crossing)")
+
+        # Calculate mixing thicknesses according to Dalziel methodology
+        if h_10 is not None and h_11 is not None:
+            # Upper mixing thickness: how far 95% contour extends above initial interface
+            ht = max(0, h_11 - h0)
+            
+            # Lower mixing thickness: how far 5% contour extends below initial interface  
+            hb = max(0, h0 - h_10)
+            
+            # Total mixing thickness
+            h_total = ht + hb
+            
+            print(f"DEBUG: Dalziel mixing thickness calculation:")
+            print(f"  h_10 (5% crossing): {h_10:.6f}")
+            print(f"  h_11 (95% crossing): {h_11:.6f}")
+            print(f"  h0 (initial interface): {h0:.6f}")
+            print(f"  ht = max(0, {h_11:.6f} - {h0:.6f}) = {ht:.6f}")
+            print(f"  hb = max(0, {h0:.6f} - {h_10:.6f}) = {hb:.6f}")
+            print(f"  h_total = {ht:.6f} + {hb:.6f} = {h_total:.6f}")
+            
+            # Additional Dalziel-specific diagnostics
+            mixing_zone_center = (h_10 + h_11) / 2
+            mixing_zone_width = h_11 - h_10
+            interface_offset = mixing_zone_center - h0
+            
+            # Mixing efficiency (fraction of domain that is mixed)
+            mixing_region = (f_avg >= lower_threshold) & (f_avg <= upper_threshold)
+            mixing_fraction = np.sum(mixing_region) / len(f_avg)
+            
+            return {
+                'ht': ht,
+                'hb': hb, 
+                'h_total': h_total,
+                'h_10': h_10,  # Position where C̄ = 0.05 (Dalziel h_{1,0})
+                'h_11': h_11,  # Position where C̄ = 0.95 (Dalziel h_{1,1})
+                'mixing_zone_center': mixing_zone_center,
+                'mixing_zone_width': mixing_zone_width,
+                'interface_offset': interface_offset,
                 'mixing_fraction': mixing_fraction,
                 'lower_threshold': lower_threshold,
                 'upper_threshold': upper_threshold,
-                'method': 'dalziel'
+                'method': 'dalziel_corrected',
+                'crossings_005': crossings_005,  # All 5% crossings found
+                'crossings_095': crossings_095   # All 95% crossings found
             }
-        
-        else:
-            raise ValueError(f"Unknown mixing thickness method: {method}")
 
-    def compute_fractal_dimension(self, data, min_box_size=0.001):
-        """Compute fractal dimension of the interface using v26 advanced methods."""
-        if self.fractal_analyzer is None:
-            print("Fractal analyzer not available. Skipping fractal dimension calculation.")
-            return {
-                'dimension': np.nan,
-                'error': np.nan,
-                'r_squared': np.nan
-            }
-    
-        # Extract contours
-        contours = self.extract_interface(data['f'], data['x'], data['y'])
-    
-        # Convert to segments
-        segments = self.convert_contours_to_segments(contours)
-    
-        if not segments:
-            print("No interface segments found.")
-            return {
-                'dimension': np.nan,
-                'error': np.nan,
-                'r_squared': np.nan
-            }
-    
-        print(f"Found {len(segments)} interface segments")
-    
-        try:
-            # Use the advanced sliding window analysis from v26
-            results = self.fractal_analyzer.analyze_fractal_segments(
-                segments, 
-                theoretical_dimension=None,  # No known theoretical value for RT
-                max_level=None,  # Let it auto-determine appropriate level
-                min_box_size=min_box_size
-            )
-            
-            # Extract key results
-            dimension = results['best_dimension']
-            error = results['dimension_error'] 
-            r_squared = results['best_r_squared']
-            
-            print(f"Fractal dimension: {dimension:.6f} ± {error:.6f}, R² = {r_squared:.6f}")
-            print(f"Window size: {results['best_window_size']}, Scaling region: {results['scaling_region']}")
-            
-            return {
-                'dimension': dimension,
-                'error': error,
-                'r_squared': r_squared,
-                'window_size': results['best_window_size'],
-                'scaling_region': results['scaling_region'],
-                'box_sizes': results['box_sizes'],
-                'box_counts': results['box_counts'],
-                'segments': segments,
-                'analysis_results': results  # Full results for detailed analysis
-            }
-        
-        except Exception as e:
-            print(f"Error in fractal dimension calculation: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return {
-                'dimension': np.nan,
-                'error': np.nan,
-                'r_squared': np.nan
-            }
-    
-    def analyze_vtk_file(self, vtk_file, output_subdir=None, mixing_method='dalziel'):
-        """Perform complete analysis on a single VTK file."""
-        # Create subdirectory for this file if needed
-        if output_subdir:
-            file_dir = os.path.join(self.output_dir, output_subdir)
         else:
-            basename = os.path.basename(vtk_file).split('.')[0]
-            file_dir = os.path.join(self.output_dir, basename)
+            # Handle case where crossings are not found
+            print(f"WARNING: Could not find required concentration crossings")
+            print(f"  5% crossings found: {len(crossings_005) if crossings_005 else 0}")
+            print(f"  95% crossings found: {len(crossings_095) if crossings_095 else 0}")
+            
+            # Provide fallback using simple thresholding
+            mixed_indices = np.where((f_avg >= lower_threshold) & (f_avg <= upper_threshold))[0]
+            
+            if len(mixed_indices) > 0:
+                # Fallback to extent-based calculation
+                mixed_y_min = y_values[mixed_indices[0]]
+                mixed_y_max = y_values[mixed_indices[-1]]
+                
+                ht_fallback = max(0, mixed_y_max - h0)
+                hb_fallback = max(0, h0 - mixed_y_min)
+                h_total_fallback = ht_fallback + hb_fallback
+                
+                print(f"  Using fallback extent method:")
+                print(f"    ht = {ht_fallback:.6f}, hb = {hb_fallback:.6f}")
+                
+                return {
+                    'ht': ht_fallback,
+                    'hb': hb_fallback,
+                    'h_total': h_total_fallback,
+                    'h_10': mixed_y_min,  # Approximate
+                    'h_11': mixed_y_max,  # Approximate
+                    'mixing_fraction': len(mixed_indices) / len(f_avg),
+                    'lower_threshold': lower_threshold,
+                    'upper_threshold': upper_threshold,
+                    'method': 'dalziel_fallback',
+                    'warning': 'Used extent-based fallback due to missing crossings'
+                }
+            else:
+                # No mixing detected at all
+                print(f"  No mixing zone detected between {lower_threshold} and {upper_threshold}")
+                return {
+                    'ht': 0,
+                    'hb': 0,
+                    'h_total': 0,
+                    'h_10': None,
+                    'h_11': None,
+                    'mixing_fraction': 0,
+                    'lower_threshold': lower_threshold,
+                    'upper_threshold': upper_threshold,
+                    'method': 'dalziel_no_mixing'
+                }
+
+    def calculate_physics_based_min_box_size(self, resolution_or_shape, domain_size=1.0, safety_factor=4):
+        """Enhanced min box size calculation for rectangular grids."""
+        # Handle both square and rectangular inputs
+        if isinstance(resolution_or_shape, (tuple, list)) and len(resolution_or_shape) == 2:
+            nx, ny = resolution_or_shape
+            resolution = max(nx, ny)  # Use finer dimension for safety
+            grid_spacing = domain_size / resolution
+            print(f"  Rectangular grid: {nx}×{ny}, using resolution={resolution} for min_box_size")
+        else:
+            resolution = resolution_or_shape
+            grid_spacing = domain_size / resolution
+            print(f"  Square grid: {resolution}×{resolution}")
         
-        os.makedirs(file_dir, exist_ok=True)
+        if resolution is None:
+            return None
         
-        print(f"Analyzing {vtk_file}...")
+        max_box_size = domain_size / 2  # Typical maximum
         
-        # Read VTK file
-        start_time = time.time()
+        # ADAPTIVE SAFETY FACTOR for low resolutions
+        if resolution <= 128:
+            adaptive_safety_factor = 2
+            print(f"  Low resolution detected: using adaptive safety factor {adaptive_safety_factor}")
+        else:
+            adaptive_safety_factor = safety_factor
+        
+        min_box_size = adaptive_safety_factor * grid_spacing
+        
+        # VALIDATE SCALING RANGE
+        scaling_ratio = min_box_size / max_box_size
+        min_scaling_ratio = 0.005  # Need at least ~2.3 decades
+        
+        if scaling_ratio > min_scaling_ratio:
+            adjusted_min_box_size = max_box_size * min_scaling_ratio
+            print(f"  Scaling range too limited (ratio: {scaling_ratio:.4f})")
+            print(f"  Adjusting min_box_size from {min_box_size:.8f} to {adjusted_min_box_size:.8f}")
+            min_box_size = adjusted_min_box_size
+            effective_safety_factor = min_box_size / grid_spacing
+            print(f"  Effective safety factor: {effective_safety_factor:.1f}×Δx")
+        else:
+            effective_safety_factor = adaptive_safety_factor
+        
+        print(f"  Physics-based box sizing:")
+        if isinstance(resolution_or_shape, (tuple, list)):
+            print(f"    Resolution: {resolution_or_shape[0]}×{resolution_or_shape[1]}")
+        else:
+            print(f"    Resolution: {resolution}×{resolution}")
+        print(f"    Grid spacing (Δx): {grid_spacing:.8f}")
+        print(f"    Safety factor: {effective_safety_factor:.1f}")
+        print(f"    Min box size: {min_box_size:.8f} ({effective_safety_factor:.1f}×Δx)")
+        print(f"    Max box size: {max_box_size:.8f}")
+        print(f"    Scaling ratio: {min_box_size/max_box_size:.6f}")
+        print(f"    Expected decades: {np.log10(max_box_size/min_box_size):.2f}")
+        
+        return min_box_size
+
+    def determine_optimal_min_box_size(self, vtk_file, segments, user_min_box_size=None):
+        """Enhanced optimal min box size determination for rectangular grids."""
+        print(f"Determining optimal min_box_size for: {os.path.basename(vtk_file)}")
+        
+        # User override always takes precedence
+        if user_min_box_size is not None:
+            print(f"  Using user-specified min_box_size: {user_min_box_size:.8f}")
+            return user_min_box_size
+        
+        # Try physics-based approach first
+        nx, ny = self.auto_detect_resolution_from_vtk_filename(vtk_file)
+        
+        if nx is not None and ny is not None:
+            # Physics-based calculation
+            if nx == ny:
+                physics_min_box_size = self.calculate_physics_based_min_box_size(nx)
+            else:
+                physics_min_box_size = self.calculate_physics_based_min_box_size((nx, ny))
+            
+            # Validate against actual segment data
+            if segments:
+                lengths = []
+                for (x1, y1), (x2, y2) in segments:
+                    length = np.sqrt((x2-x1)**2 + (y2-y1)**2)
+                    if length > 0:
+                        lengths.append(length)
+                
+                if lengths:
+                    min_segment = np.min(lengths)
+                    median_segment = np.median(lengths)
+                    
+                    print(f"  Validation against interface segments:")
+                    print(f"    Min segment length: {min_segment:.8f}")
+                    print(f"    Median segment length: {median_segment:.8f}")
+                    
+                    # Ensure we're not going below reasonable limits
+                    if physics_min_box_size < min_segment * 0.1:
+                        adjusted = min_segment * 0.5  # More conservative
+                        print(f"    → Physics size too small, adjusting to: {adjusted:.8f}")
+                        return adjusted
+            
+            return physics_min_box_size
+        
+        else:
+            # Fallback to robust statistical approach
+            print(f"  Resolution not detected, using robust statistical approach")
+            return self.calculate_robust_min_box_size(segments)
+
+    def calculate_robust_min_box_size(self, segments, percentile=10):
+        """Robust statistical approach for when resolution is unknown."""
+        if not segments:
+            print("    Warning: No segments for statistical analysis")
+            return 0.001
+        
+        lengths = []
+        for (x1, y1), (x2, y2) in segments:
+            length = np.sqrt((x2-x1)**2 + (y2-y1)**2)
+            if length > 0:
+                lengths.append(length)
+        
+        if not lengths:
+            print("    Warning: No valid segment lengths")
+            return 0.001
+        
+        lengths = np.array(lengths)
+        
+        # Use percentile instead of minimum to avoid noise
+        robust_length = np.percentile(lengths, percentile)
+        
+        # Calculate domain extent for scaling validation
+        min_x = min(min(s[0][0], s[1][0]) for s in segments)
+        max_x = max(max(s[0][0], s[1][0]) for s in segments)
+        min_y = min(min(s[0][1], s[1][1]) for s in segments)
+        max_y = max(max(s[0][1], s[1][1]) for s in segments)
+        extent = max(max_x - min_x, max_y - min_y)
+        
+        print(f"    Statistical analysis:")
+        print(f"      {percentile}th percentile length: {robust_length:.8f}")
+        print(f"      Domain extent: {extent:.6f}")
+        
+        # Use conservative multiplier
+        min_box_size = robust_length * 0.8  # Slightly smaller than percentile
+        
+        # Ensure sufficient scaling range (at least 2 decades)
+        max_box_size = extent / 2
+        if min_box_size / max_box_size > 0.01:
+            adjusted = max_box_size * 0.005  # Force ~2.3 decades
+            print(f"      → Adjusting for scaling range: {adjusted:.8f}")
+            min_box_size = adjusted
+        
+        print(f"    Final robust min_box_size: {min_box_size:.8f}")
+        return min_box_size
+
+    # STEP 5
+    def analyze_vtk_file_legacy(self, vtk_file, subdir, mixing_method='dalziel', h0=None, min_box_size=None):
+        """
+        Legacy analyze_vtk_file method for backward compatibility.
+        This is the original method that performs complete analysis of a single VTK file.
+        """
+        print(f"🔍 Analyzing: {os.path.basename(vtk_file)}")
+
+        # Read VTK data
         data = self.read_vtk_file(vtk_file)
-        print(f"VTK file read in {time.time() - start_time:.2f} seconds")
-        
+
+        # Auto-detect resolution
+        nx, ny = self.auto_detect_resolution_from_vtk_filename(vtk_file)
+
         # Find initial interface position
-        h0 = self.find_initial_interface(data)
-        print(f"Initial interface position: {h0:.6f}")
-        
-        # Compute mixing thickness using specified method
+        if h0 is None:
+            h0 = self.find_initial_interface(data)
+
+        print(f"Initial interface position: h0 = {h0:.6f}")
+
+        # Calculate mixing thickness using specified method
         mixing = self.compute_mixing_thickness(data, h0, method=mixing_method)
-        print(f"Mixing thickness ({mixing_method}): {mixing['h_total']:.6f} (ht={mixing['ht']:.6f}, hb={mixing['hb']:.6f})")
-        
-        # Additional diagnostics for Dalziel method
-        if mixing_method == 'dalziel':
-            print(f"  Mixing zone center: {mixing['y_center']:.6f}")
-            print(f"  Mixing fraction: {mixing['mixing_fraction']:.4f}")
-            print(f"  Thresholds: {mixing['lower_threshold']:.2f} - {mixing['upper_threshold']:.2f}")
-        
-        # Extract interface for visualization and save to file
-        contours = self.extract_interface(data['f'], data['x'], data['y'])
-        interface_file = os.path.join(file_dir, 'interface.dat')
-        
-        with open(interface_file, 'w') as f:
-            f.write(f"# Interface data for t = {data['time']:.6f}\n")
-            f.write(f"# Method: {mixing_method}\n")
-            segment_count = 0
-            for contour in contours:
-                for i in range(len(contour) - 1):
-                    f.write(f"{contour[i,0]:.7f},{contour[i,1]:.7f} {contour[i+1,0]:.7f},{contour[i+1,1]:.7f}\n")
-                    segment_count += 1
-            f.write(f"# Found {segment_count} contour segments\n")
-        
-        print(f"Interface saved to {interface_file} ({segment_count} segments)")
-        
-        # Compute fractal dimension
-        fd_start_time = time.time()
-        fd_results = self.compute_fractal_dimension(data)
-        print(f"Fractal dimension: {fd_results['dimension']:.6f} ± {fd_results['error']:.6f} (R²={fd_results['r_squared']:.6f})")
-        print(f"Fractal calculation time: {time.time() - fd_start_time:.2f} seconds")
-        
-        # Visualize interface and box counting
-        if not np.isnan(fd_results['dimension']):
-            fig = plt.figure(figsize=(12, 10))
-            plt.contourf(data['x'], data['y'], data['f'], levels=20, cmap='viridis')
-            plt.colorbar(label='Volume Fraction')
-            
-            # Plot interface
-            for contour in contours:
-                plt.plot(contour[:, 0], contour[:, 1], 'r-', linewidth=2)
-            
-            # Plot initial interface position
-            plt.axhline(y=h0, color='k', linestyle='--', alpha=0.5, label=f'Initial Interface (y={h0:.4f})')
-            
-            # Plot mixing zone boundaries for Dalziel method
-            if mixing_method == 'dalziel':
-                y_upper = h0 + mixing['ht']
-                y_lower = h0 - mixing['hb']
-                plt.axhline(y=y_upper, color='orange', linestyle=':', alpha=0.7, label=f'Upper boundary')
-                plt.axhline(y=y_lower, color='orange', linestyle=':', alpha=0.7, label=f'Lower boundary')
-            
-            plt.xlabel('X')
-            plt.ylabel('Y')
-            plt.title(f'Rayleigh-Taylor Interface at t = {data["time"]:.3f} ({mixing_method} method)')
-            plt.legend()
-            plt.grid(True)
-            plt.savefig(os.path.join(file_dir, 'interface_plot.png'), dpi=300)
-            plt.close()
-            
-            # Plot box counting results if available
-            if 'box_sizes' in fd_results and fd_results['box_sizes'] is not None:
-                fig = plt.figure(figsize=(10, 8))
-                plt.loglog(fd_results['box_sizes'], fd_results['box_counts'], 'bo-', label='Data')
-                
-                # Linear regression line
-                log_sizes = np.log(fd_results['box_sizes'])
-                slope = -fd_results['dimension']
-                # Use intercept from analysis if available
-                if 'analysis_results' in fd_results and 'intercept' in fd_results['analysis_results']:
-                    intercept = fd_results['analysis_results']['intercept']
-                else:
-                    # Fallback calculation
-                    log_counts = np.log(fd_results['box_counts'])
-                    intercept = np.mean(log_counts - slope * log_sizes)
-                
-                fit_counts = np.exp(intercept + slope * log_sizes)
-                plt.loglog(fd_results['box_sizes'], fit_counts, 'r-', 
-                          label=f"D = {fd_results['dimension']:.4f} ± {fd_results['error']:.4f}")
-                
-                plt.xlabel('Box Size')
-                plt.ylabel('Box Count')
-                plt.title(f'Fractal Dimension at t = {data["time"]:.3f}')
-                plt.legend()
-                plt.grid(True)
-                plt.savefig(os.path.join(file_dir, 'fractal_dimension.png'), dpi=300)
-                plt.close()
-        
-        # Prepare return results
+
+        # Calculate fractal dimension
+        fd_results = self.compute_fractal_dimension(data, min_box_size=min_box_size)
+
+        # Create results dictionary
         result = {
+            'file': vtk_file,
             'time': data['time'],
             'h0': h0,
             'ht': mixing['ht'],
@@ -441,216 +1535,105 @@ class RTAnalyzer:
             'fractal_dim': fd_results['dimension'],
             'fd_error': fd_results['error'],
             'fd_r_squared': fd_results['r_squared'],
-            'mixing_method': mixing_method
+            'mixing_method': mixing_method,
+            'resolution': (nx, ny) if nx and ny else None
         }
-        
-        # Add Dalziel-specific results
+
+        # Add method-specific results
         if mixing_method == 'dalziel':
-            result.update({
-                'y_center': mixing['y_center'],
-                'mixing_fraction': mixing['mixing_fraction'],
-                'lower_threshold': mixing['lower_threshold'],
-                'upper_threshold': mixing['upper_threshold']
-            })
-        
+            if 'mixing_zone_center' in mixing:
+                result['y_center'] = mixing['mixing_zone_center']
+                result['mixing_fraction'] = mixing.get('mixing_fraction', 0.0)
+                result['h_10'] = mixing.get('h_10')
+                result['h_11'] = mixing.get('h_11')
+
+        # Save interface data
+        interface_file = os.path.join(subdir, f"interface_t{data['time']:.6f}.dat")
+        self._save_interface_data_simple(interface_file, data, mixing_method, nx or 0, ny or 0)
+
+        print(f"  Results: ht={mixing['ht']:.6f}, hb={mixing['hb']:.6f}, D={fd_results['dimension']:.6f}")
+
         return result
-    
+
+    def _save_interface_data_simple(self, interface_file, data, mixing_method, nx, ny):
+        """Simple interface data saving method."""
+        try:
+            # Extract interface contours
+            contours = self.extract_interface(data['f'], data['x'], data['y'], extract_all_levels=False)
+            segments = self.convert_contours_to_segments(contours)
+
+            with open(interface_file, 'w') as f:
+                f.write(f"# Interface data for t = {data['time']:.6f}\n")
+                f.write(f"# Method: {mixing_method}\n")
+                f.write(f"# Grid: {nx}×{ny}\n")
+
+                # Write segments
+                for (x1, y1), (x2, y2) in segments:
+                    f.write(f"{x1:.7f},{y1:.7f} {x2:.7f},{y2:.7f}\n")
+
+                f.write(f"# Found {len(segments)} interface segments\n")
+
+            print(f"Interface saved to {interface_file} ({len(segments)} segments)")
+
+        except Exception as e:
+            print(f"Error saving interface data: {e}")
+
     def process_vtk_series(self, vtk_pattern, resolution=None, mixing_method='dalziel'):
         """Process a series of VTK files matching the given pattern."""
         # Find all matching VTK files
         vtk_files = sorted(glob.glob(vtk_pattern))
-        
+
         if not vtk_files:
             raise ValueError(f"No VTK files found matching pattern: {vtk_pattern}")
-        
+
         print(f"Found {len(vtk_files)} VTK files matching {vtk_pattern}")
         print(f"Using mixing method: {mixing_method}")
-        
+
         # Create subdirectory for this resolution if provided
         if resolution:
             subdir = f"res_{resolution}_{mixing_method}"
         else:
             subdir = f"results_{mixing_method}"
-        
+
         results_dir = os.path.join(self.output_dir, subdir)
         os.makedirs(results_dir, exist_ok=True)
-        
+
         # Process each file
         results = []
-        
+
         for i, vtk_file in enumerate(vtk_files):
             print(f"\nProcessing file {i+1}/{len(vtk_files)}: {vtk_file}")
-            
+
             try:
                 # Analyze this file
-                result = self.analyze_vtk_file(vtk_file, subdir, mixing_method=mixing_method)
+                result = self.analyze_vtk_file_legacy(vtk_file, results_dir, mixing_method=mixing_method)
                 results.append(result)
-                
+
                 # Print progress
                 print(f"Completed {i+1}/{len(vtk_files)} files")
-                
+
             except Exception as e:
                 print(f"Error processing {vtk_file}: {str(e)}")
                 import traceback
                 traceback.print_exc()
-        
+
         # Create summary dataframe
         if results:
             df = pd.DataFrame(results)
-            
+
             # Save results
             csv_file = os.path.join(results_dir, f'results_summary_{mixing_method}.csv')
             df.to_csv(csv_file, index=False)
             print(f"Results saved to {csv_file}")
-            
+
             # Create summary plots
             self.create_summary_plots(df, results_dir, mixing_method)
-            
+
             return df
         else:
             print("No results to summarize")
             return None
-    
-    def analyze_resolution_convergence(self, vtk_files, resolutions, target_time=9.0, mixing_method='dalziel'):
-        """Analyze how fractal dimension and mixing thickness converge with grid resolution."""
-        results = []
-        
-        print(f"Analyzing resolution convergence using {mixing_method} mixing method")
-        
-        for vtk_file, resolution in zip(vtk_files, resolutions):
-            print(f"\nAnalyzing resolution {resolution}x{resolution} using {vtk_file}")
-            
-            try:
-                # Read and analyze the file
-                data = self.read_vtk_file(vtk_file)
-                
-                # Check if time matches target
-                if abs(data['time'] - target_time) > 0.1:
-                    print(f"Warning: File time {data['time']} differs from target {target_time}")
-                
-                # Find initial interface
-                h0 = self.find_initial_interface(data)
-                
-                # Calculate mixing thickness
-                mixing = self.compute_mixing_thickness(data, h0, method=mixing_method)
-                
-                # Calculate fractal dimension
-                fd_results = self.compute_fractal_dimension(data)
-                
-                # Save results
-                result = {
-                    'resolution': resolution,
-                    'time': data['time'],
-                    'h0': h0,
-                    'ht': mixing['ht'],
-                    'hb': mixing['hb'],
-                    'h_total': mixing['h_total'],
-                    'fractal_dim': fd_results['dimension'],
-                    'fd_error': fd_results['error'],
-                    'fd_r_squared': fd_results['r_squared'],
-                    'mixing_method': mixing_method
-                }
-                
-                # Add Dalziel-specific results
-                if mixing_method == 'dalziel':
-                    result.update({
-                        'y_center': mixing['y_center'],
-                        'mixing_fraction': mixing['mixing_fraction']
-                    })
-                
-                results.append(result)
-                
-            except Exception as e:
-                print(f"Error analyzing {vtk_file}: {str(e)}")
-                import traceback
-                traceback.print_exc()
-        
-        # Convert to DataFrame
-        if results:
-            df = pd.DataFrame(results)
-            
-            # Create output directory
-            convergence_dir = os.path.join(self.output_dir, f"convergence_t{target_time}_{mixing_method}")
-            os.makedirs(convergence_dir, exist_ok=True)
-            
-            # Save results
-            csv_file = os.path.join(convergence_dir, f'resolution_convergence_{mixing_method}.csv')
-            df.to_csv(csv_file, index=False)
-            
-            # Create convergence plots
-            self._plot_resolution_convergence(df, target_time, convergence_dir, mixing_method)
-            
-            return df
-        else:
-            print("No results to analyze")
-            return None
-    
-    def _plot_resolution_convergence(self, df, target_time, output_dir, mixing_method):
-        """Plot resolution convergence results."""
-        # Plot fractal dimension vs resolution
-        plt.figure(figsize=(10, 8))
-        
-        plt.errorbar(df['resolution'], df['fractal_dim'], yerr=df['fd_error'],
-                    fmt='o-', capsize=5, elinewidth=1, markersize=8)
-        
-        plt.xscale('log', base=2)  # Use log scale with base 2
-        plt.xlabel('Grid Resolution')
-        plt.ylabel(f'Fractal Dimension at t={target_time}')
-        plt.title(f'Fractal Dimension Convergence at t={target_time} ({mixing_method} method)')
-        plt.grid(True)
-        
-        # Add grid points as labels
-        for i, res in enumerate(df['resolution']):
-            plt.annotate(f"{res}×{res}", (df['resolution'].iloc[i], df['fractal_dim'].iloc[i]),
-                        xytext=(5, 5), textcoords='offset points')
-        
-        # Add asymptote if enough points
-        if len(df) >= 3:
-            # Extrapolate to infinite resolution (1/N = 0)
-            x = 1.0 / np.array(df['resolution'])
-            y = df['fractal_dim']
-            coeffs = np.polyfit(x[-3:], y[-3:], 1)
-            asymptotic_value = coeffs[1]  # y-intercept
-            
-            plt.axhline(y=asymptotic_value, color='r', linestyle='--',
-                       label=f"Extrapolated value: {asymptotic_value:.4f}")
-            plt.legend()
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, f"dimension_convergence_{mixing_method}.png"), dpi=300)
-        plt.close()
-        
-        # Plot mixing layer thickness convergence
-        plt.figure(figsize=(10, 8))
-        
-        plt.plot(df['resolution'], df['h_total'], 'o-', markersize=8, label='Total')
-        plt.plot(df['resolution'], df['ht'], 's--', markersize=6, label='Upper')
-        plt.plot(df['resolution'], df['hb'], 'd--', markersize=6, label='Lower')
-        
-        plt.xscale('log', base=2)
-        plt.xlabel('Grid Resolution')
-        plt.ylabel(f'Mixing Layer Thickness at t={target_time}')
-        plt.title(f'Mixing Layer Thickness Convergence at t={target_time} ({mixing_method} method)')
-        plt.grid(True)
-        plt.legend()
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, f"mixing_convergence_{mixing_method}.png"), dpi=300)
-        plt.close()
-        
-        # Additional plot for Dalziel method showing mixing fraction
-        if mixing_method == 'dalziel' and 'mixing_fraction' in df.columns:
-            plt.figure(figsize=(10, 6))
-            plt.plot(df['resolution'], df['mixing_fraction'], 'o-', markersize=8, color='purple')
-            plt.xscale('log', base=2)
-            plt.xlabel('Grid Resolution')
-            plt.ylabel('Mixing Fraction')
-            plt.title(f'Mixing Fraction Convergence at t={target_time} (Dalziel method)')
-            plt.grid(True)
-            plt.tight_layout()
-            plt.savefig(os.path.join(output_dir, f"mixing_fraction_convergence.png"), dpi=300)
-            plt.close()
-    
+
     def create_summary_plots(self, df, output_dir, mixing_method):
         """Create summary plots of the time series results."""
         # Plot mixing layer evolution
@@ -660,574 +1643,168 @@ class RTAnalyzer:
         plt.plot(df['time'], df['hb'], 'g--', label='Lower', linewidth=2)
         plt.xlabel('Time')
         plt.ylabel('Mixing Layer Thickness')
-        plt.title(f'Mixing Layer Evolution ({mixing_method} method)')
+        # Only add title if not disabled
+        if not self.no_titles:
+            plt.title(f'Mixing Layer Evolution ({mixing_method} method)')
         plt.legend()
         plt.grid(True)
         plt.savefig(os.path.join(output_dir, f'mixing_evolution_{mixing_method}.png'), dpi=300)
         plt.close()
-        
+
         # Plot fractal dimension evolution
         plt.figure(figsize=(10, 6))
         plt.errorbar(df['time'], df['fractal_dim'], yerr=df['fd_error'],
                    fmt='ko-', capsize=3, linewidth=2, markersize=5)
-        plt.fill_between(df['time'], 
-                       df['fractal_dim'] - df['fd_error'],
-                       df['fractal_dim'] + df['fd_error'],
-                       alpha=0.3, color='gray')
+        plt.fill_between(df['time'],
+                   df['fractal_dim'] - df['fd_error'],
+                   df['fractal_dim'] + df['fd_error'],
+                   alpha=0.3, color='gray')
         plt.xlabel('Time')
         plt.ylabel('Fractal Dimension')
-        plt.title(f'Fractal Dimension Evolution ({mixing_method} method)')
+        # Only add title if not disabled
+        if not self.no_titles:
+            plt.title(f'Fractal Dimension Evolution ({mixing_method} method)')
         plt.grid(True)
         plt.savefig(os.path.join(output_dir, f'dimension_evolution_{mixing_method}.png'), dpi=300)
         plt.close()
-        
-        # Plot R-squared evolution
-        plt.figure(figsize=(10, 6))
-        plt.plot(df['time'], df['fd_r_squared'], 'm-o', linewidth=2)
-        plt.xlabel('Time')
-        plt.ylabel('R² Value')
-        plt.title(f'Fractal Dimension Fit Quality ({mixing_method} method)')
-        plt.ylim(0, 1)
-        plt.grid(True)
-        plt.savefig(os.path.join(output_dir, f'r_squared_evolution_{mixing_method}.png'), dpi=300)
-        plt.close()
-        
-        # Additional plot for Dalziel method
-        if mixing_method == 'dalziel' and 'mixing_fraction' in df.columns:
-            plt.figure(figsize=(10, 6))
-            plt.plot(df['time'], df['mixing_fraction'], 'c-o', linewidth=2)
-            plt.xlabel('Time')
-            plt.ylabel('Mixing Fraction')
-            plt.title('Mixing Fraction Evolution (Dalziel method)')
-            plt.grid(True)
-            plt.savefig(os.path.join(output_dir, 'mixing_fraction_evolution.png'), dpi=300)
-            plt.close()
-        
-        # Combined plot with mixing layer and fractal dimension
-        fig, ax1 = plt.subplots(figsize=(12, 8))
-        
-        # Mixing layer on left axis
-        ax1.plot(df['time'], df['h_total'], 'b-', label='Mixing Thickness', linewidth=2)
-        ax1.set_xlabel('Time')
-        ax1.set_ylabel('Mixing Layer Thickness', color='b')
-        ax1.tick_params(axis='y', labelcolor='b')
-        
-        # Fractal dimension on right axis
-        ax2 = ax1.twinx()
-        ax2.errorbar(df['time'], df['fractal_dim'], yerr=df['fd_error'],
-                   fmt='ro-', capsize=3, label='Fractal Dimension')
-        ax2.set_ylabel('Fractal Dimension', color='r')
-        ax2.tick_params(axis='y', labelcolor='r')
-        
-        # Add both legends
-        lines1, labels1 = ax1.get_legend_handles_labels()
-        lines2, labels2 = ax2.get_legend_handles_labels()
-        ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
-        
-        plt.title(f'Mixing Layer and Fractal Dimension Evolution ({mixing_method} method)')
-        plt.grid(True)
-        plt.savefig(os.path.join(output_dir, f'combined_evolution_{mixing_method}.png'), dpi=300)
-        plt.close()
 
-    def compute_multifractal_spectrum(self, data, min_box_size=0.001, q_values=None, output_dir=None):
-        """Compute multifractal spectrum of the interface.
-        
-        Args:
-            data: Data dictionary containing VTK data
-            min_box_size: Minimum box size for analysis (default: 0.001)
-            q_values: List of q moments to analyze (default: -5 to 5 in 0.5 steps)
-            output_dir: Directory to save results (default: None)
-            
-        Returns:
-            dict: Multifractal spectrum results
-        """
-        if self.fractal_analyzer is None:
-            print("Fractal analyzer not available. Skipping multifractal analysis.")
-            return None
-        
-        # Set default q values if not provided
-        if q_values is None:
-            q_values = np.arange(-5, 5.1, 0.5)
-        
-        # Extract contours and convert to segments
-        contours = self.extract_interface(data['f'], data['x'], data['y'])
-        segments = self.convert_contours_to_segments(contours)
-        
-        if not segments:
-            print("No interface segments found. Skipping multifractal analysis.")
-            return None
-        
-        # Create output directory if specified and not existing
-        if output_dir:
-            os.makedirs(output_dir, exist_ok=True)
-        
-        # Calculate extent for max box size
-        min_x = min(min(s[0][0], s[1][0]) for s in segments)
-        max_x = max(max(s[0][0], s[1][0]) for s in segments)
-        min_y = min(min(s[0][1], s[1][1]) for s in segments)
-        max_y = max(max(s[0][1], s[1][1]) for s in segments)
-        
-        extent = max(max_x - min_x, max_y - min_y)
-        max_box_size = extent / 2
-        
-        print(f"Performing multifractal analysis with {len(q_values)} q-values")
-        print(f"Box size range: {min_box_size:.6f} to {max_box_size:.6f}")
-        
-        # Generate box sizes
-        box_sizes = []
-        current_size = max_box_size
-        box_size_factor = 1.5
-        
-        while current_size >= min_box_size:
-            box_sizes.append(current_size)
-            current_size /= box_size_factor
-            
-        box_sizes = np.array(box_sizes)
-        num_box_sizes = len(box_sizes)
-        
-        print(f"Using {num_box_sizes} box sizes for analysis")
-        
-        # Use spatial index from BoxCounter to speed up calculations
-        bc = self.fractal_analyzer.box_counter
-        
-        # Add small margin to bounding box
-        margin = extent * 0.01
-        min_x -= margin
-        max_x += margin
-        min_y -= margin
-        max_y += margin
-        
-        # Create spatial index for segments
-        start_time = time.time()
-        print("Creating spatial index...")
-        
-        # Determine grid cell size for spatial index (use smallest box size)
-        grid_size = min_box_size * 2
-        segment_grid, grid_width, grid_height = bc.create_spatial_index(
-            segments, min_x, min_y, max_x, max_y, grid_size)
-        
-        print(f"Spatial index created in {time.time() - start_time:.2f} seconds")
-        
-        # Initialize data structures for box counting
-        all_box_counts = []
-        all_probabilities = []
-        
-        # Analyze each box size
-        for box_idx, box_size in enumerate(box_sizes):
-            box_start_time = time.time()
-            print(f"Processing box size {box_idx+1}/{num_box_sizes}: {box_size:.6f}")
-            
-            num_boxes_x = int(np.ceil((max_x - min_x) / box_size))
-            num_boxes_y = int(np.ceil((max_y - min_y) / box_size))
-            
-            # Count segments in each box
-            box_counts = np.zeros((num_boxes_x, num_boxes_y))
-            
-            for i in range(num_boxes_x):
-                for j in range(num_boxes_y):
-                    box_xmin = min_x + i * box_size
-                    box_ymin = min_y + j * box_size
-                    box_xmax = box_xmin + box_size
-                    box_ymax = box_ymin + box_size
-                    
-                    # Find grid cells that might overlap this box
-                    min_cell_x = max(0, int((box_xmin - min_x) / grid_size))
-                    max_cell_x = min(int((box_xmax - min_x) / grid_size) + 1, grid_width)
-                    min_cell_y = max(0, int((box_ymin - min_y) / grid_size))
-                    max_cell_y = min(int((box_ymax - min_y) / grid_size) + 1, grid_height)
-                    
-                    # Get segments that might intersect this box
-                    segments_to_check = set()
-                    for cell_x in range(min_cell_x, max_cell_x):
-                        for cell_y in range(min_cell_y, max_cell_y):
-                            segments_to_check.update(segment_grid.get((cell_x, cell_y), []))
-                    
-                    # Count intersections (for multifractal, count each segment)
-                    count = 0
-                    for seg_idx in segments_to_check:
-                        (x1, y1), (x2, y2) = segments[seg_idx]
-                        if self.fractal_analyzer.base.liang_barsky_line_box_intersection(
-                                x1, y1, x2, y2, box_xmin, box_ymin, box_xmax, box_ymax):
-                            count += 1
-                    
-                    box_counts[i, j] = count
-            
-            # Keep only non-zero counts and calculate probabilities
-            occupied_boxes = box_counts[box_counts > 0]
-            total_segments = occupied_boxes.sum()
-            
-            if total_segments > 0:
-                probabilities = occupied_boxes / total_segments
-            else:
-                probabilities = np.array([])
-                
-            all_box_counts.append(occupied_boxes)
-            all_probabilities.append(probabilities)
-            
-            # Report statistics
-            box_count = len(occupied_boxes)
-            print(f"  Box size: {box_size:.6f}, Occupied boxes: {box_count}, Time: {time.time() - box_start_time:.2f}s")
-        
-        # Calculate multifractal properties
-        print("Calculating multifractal spectrum...")
-        
-        taus = np.zeros(len(q_values))
-        Dqs = np.zeros(len(q_values))
-        r_squared = np.zeros(len(q_values))
-        
-        for q_idx, q in enumerate(q_values):
-            print(f"Processing q = {q:.1f}")
-            
-            # Skip q=1 as it requires special treatment
-            if abs(q - 1.0) < 1e-6:
-                continue
-                
-            # Calculate partition function for each box size
-            Z_q = np.zeros(num_box_sizes)
-            
-            for i, probabilities in enumerate(all_probabilities):
-                if len(probabilities) > 0:
-                    Z_q[i] = np.sum(probabilities ** q)
+def main():
+    """Main function to run RT analyzer from command line."""
+    parser = argparse.ArgumentParser(
+        description='Rayleigh-Taylor Simulation Analyzer with Fractal Dimension Calculation',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Analyze with standard method
+  python rt_analyzer.py --file RT_0009000.vtk
+
+  # Analyze with CONREC precision extraction
+  python rt_analyzer.py --file RT_0009000.vtk --use-conrec
+
+  # Analyze with PLIC theoretical reconstruction
+  python rt_analyzer.py --file RT_0009000.vtk --use-plic
+
+  # Process time series with optimization
+  python rt_analyzer.py --pattern "RT_*.vtk" --mixing_method dalziel
+
+  # Test the new optimization
+  python rt_analyzer.py --file RT_0009000.vtk --test-optimization
+""")
+
+    parser.add_argument('--file', help='Single VTK file to analyze')
+    parser.add_argument('--pattern', help='Pattern for VTK files (e.g., "RT_*.vtk")')
+    parser.add_argument('--output_dir', default='./rt_analysis',
+                   help='Output directory for results (default: ./rt_analysis)')
+    parser.add_argument('--mixing_method', choices=['geometric', 'statistical', 'dalziel'],
+                   default='dalziel', help='Method for computing mixing thickness')
+    parser.add_argument('--h0', type=float, help='Initial interface position (auto-detected if not provided)')
+    parser.add_argument('--min_box_size', type=float,
+                   help='Minimum box size for fractal analysis (auto-estimated if not provided)')
+    parser.add_argument('--use_grid_optimization', action='store_true',
+                   help='Use grid optimization for fractal dimension calculation')
+    parser.add_argument('--no_titles', action='store_true',
+                   help='Disable plot titles for journal submissions')
+    parser.add_argument('--use-conrec', action='store_true',
+                   help='Use CONREC algorithm for precision interface extraction')
+    parser.add_argument('--use-plic', action='store_true',
+                   help='Use PLIC algorithm for theoretical VOF interface reconstruction')
+    parser.add_argument('--test-optimization', action='store_true',
+                   help='Test the new optimization methods')
+    parser.add_argument('--debug', action='store_true',
+                   help='Enable debug output')
+
+    args = parser.parse_args()
+
+    # Validate arguments
+    if not any([args.file, args.pattern]):
+        print("Error: Must specify --file or --pattern")
+        parser.print_help()
+        return
+
+    # Create analyzer instance
+    analyzer = RTAnalyzer(
+        output_dir=args.output_dir,
+        use_grid_optimization=args.use_grid_optimization,
+        no_titles=args.no_titles,
+        use_conrec=getattr(args, 'use_conrec', False),
+        use_plic=getattr(args, 'use_plic', False),
+        debug=args.debug
+    )
+
+    print(f"RT Analyzer initialized")
+    # Determine active extraction method for display
+    if getattr(args, 'use_plic', False):
+        extraction_method = "PLIC (theoretical reconstruction)"
+    elif getattr(args, 'use_conrec', False):
+        extraction_method = "CONREC (precision)"
+    else:
+        extraction_method = "scikit-image (standard)"
+
+    print(f"Interface extraction: {extraction_method}")
+    print(f"Output directory: {args.output_dir}")
+    print(f"Mixing method: {args.mixing_method}")
+    print(f"Grid optimization: {'ENABLED' if args.use_grid_optimization else 'DISABLED'}")
+
+    try:
+        if args.file:
+            print(f"\nAnalyzing single file: {args.file}")
+
+            if args.test_optimization:
+                # Test the new optimization
+                print("🚀 Testing optimization methods...")
+                result = analyzer.analyze_vtk_file(args.file, ['fractal_dim', 'curvature', 'wavelength'])
+                if result:
+                    print(f"✅ Optimization test successful!")
+                    print(f"  File: {result['file_path']}")
+                    print(f"  Interface extraction time: {result['interface_extraction_time']:.3f}s")
+                    print(f"  Interface points: {result['interface_point_count']}")
+                    print(f"  Total analysis time: {result['total_analysis_time']:.3f}s")
+                    if 'fractal_dimension' in result:
+                        print(f"  Fractal dimension: {result['fractal_dimension']:.6f}")
                 else:
-                    Z_q[i] = np.nan
-            
-            # Remove NaN values
-            valid = ~np.isnan(Z_q)
-            if np.sum(valid) < 3:
-                print(f"Warning: Not enough valid points for q={q}")
-                taus[q_idx] = np.nan
-                Dqs[q_idx] = np.nan
-                r_squared[q_idx] = np.nan
-                continue
-                
-            log_eps = np.log(box_sizes[valid])
-            log_Z_q = np.log(Z_q[valid])
-            
-            # Linear regression to find tau(q)
-            slope, intercept, r_value, p_value, std_err = stats.linregress(log_eps, log_Z_q)
-            
-            # Calculate tau(q) and D(q)
-            taus[q_idx] = slope
-            Dqs[q_idx] = taus[q_idx] / (q - 1) if q != 1 else np.nan
-            r_squared[q_idx] = r_value ** 2
-            
-            print(f"  τ({q}) = {taus[q_idx]:.4f}, D({q}) = {Dqs[q_idx]:.4f}, R² = {r_squared[q_idx]:.4f}")
-        
-        # Handle q=1 case (information dimension) separately
-        q1_idx = np.where(np.abs(q_values - 1.0) < 1e-6)[0]
-        if len(q1_idx) > 0:
-            q1_idx = q1_idx[0]
-            print(f"Processing q = 1.0 (information dimension)")
-            
-            # Calculate using L'Hôpital's rule
-            mu_log_mu = np.zeros(num_box_sizes)
-            
-            for i, probabilities in enumerate(all_probabilities):
-                if len(probabilities) > 0:
-                    # Use -sum(p*log(p)) for information dimension
-                    mu_log_mu[i] = -np.sum(probabilities * np.log(probabilities))
-                else:
-                    mu_log_mu[i] = np.nan
-            
-            # Remove NaN values
-            valid = ~np.isnan(mu_log_mu)
-            if np.sum(valid) >= 3:
-                log_eps = np.log(box_sizes[valid])
-                log_mu = mu_log_mu[valid]
-                
-                # Linear regression
-                slope, intercept, r_value, p_value, std_err = stats.linregress(log_eps, log_mu)
-                
-                # Store information dimension
-                taus[q1_idx] = -slope  # Convention: τ(1) = -D₁
-                Dqs[q1_idx] = -slope   # Information dimension D₁
-                r_squared[q1_idx] = r_value ** 2
-                
-                print(f"  τ(1) = {taus[q1_idx]:.4f}, D(1) = {Dqs[q1_idx]:.4f}, R² = {r_squared[q1_idx]:.4f}")
-        
-        # Calculate alpha and f(alpha) for multifractal spectrum
-        alpha = np.zeros(len(q_values))
-        f_alpha = np.zeros(len(q_values))
-        
-        print("Calculating multifractal spectrum f(α)...")
-        
-        for i, q in enumerate(q_values):
-            if np.isnan(taus[i]):
-                alpha[i] = np.nan
-                f_alpha[i] = np.nan
-                continue
-                
-            # Numerical differentiation for alpha
-            if i > 0 and i < len(q_values) - 1:
-                alpha[i] = -(taus[i+1] - taus[i-1]) / (q_values[i+1] - q_values[i-1])
-            elif i == 0:
-                alpha[i] = -(taus[i+1] - taus[i]) / (q_values[i+1] - q_values[i])
+                    print("❌ Optimization test failed")
             else:
-                alpha[i] = -(taus[i] - taus[i-1]) / (q_values[i] - q_values[i-1])
-            
-            # Calculate f(alpha)
-            f_alpha[i] = q * alpha[i] + taus[i]
-            
-            print(f"  q = {q:.1f}, α = {alpha[i]:.4f}, f(α) = {f_alpha[i]:.4f}")
-        
-        # Calculate multifractal parameters
-        valid_idx = ~np.isnan(Dqs)
-        if np.sum(valid_idx) >= 3:
-            D0 = Dqs[np.searchsorted(q_values, 0)] if 0 in q_values else np.nan
-            D1 = Dqs[np.searchsorted(q_values, 1)] if 1 in q_values else np.nan
-            D2 = Dqs[np.searchsorted(q_values, 2)] if 2 in q_values else np.nan
-            
-            # Width of multifractal spectrum
-            valid = ~np.isnan(alpha)
-            if np.sum(valid) >= 2:
-                alpha_width = np.max(alpha[valid]) - np.min(alpha[valid])
-            else:
-                alpha_width = np.nan
-            
-            # Degree of multifractality: D(-∞) - D(+∞) ≈ D(-5) - D(5)
-            if -5 in q_values and 5 in q_values:
-                degree_multifractality = Dqs[np.searchsorted(q_values, -5)] - Dqs[np.searchsorted(q_values, 5)]
-            else:
-                degree_multifractality = np.nan
-            
-            print(f"Multifractal parameters:")
-            print(f"  D(0) = {D0:.4f} (capacity dimension)")
-            print(f"  D(1) = {D1:.4f} (information dimension)")
-            print(f"  D(2) = {D2:.4f} (correlation dimension)")
-            print(f"  α width = {alpha_width:.4f}")
-            print(f"  Degree of multifractality = {degree_multifractality:.4f}")
-        else:
-            D0 = D1 = D2 = alpha_width = degree_multifractality = np.nan
-            print("Warning: Not enough valid points to calculate multifractal parameters")
-        
-        # Plot results if output directory provided
-        if output_dir:
-            # Plot D(q) vs q
-            plt.figure(figsize=(10, 6))
-            valid = ~np.isnan(Dqs)
-            plt.plot(q_values[valid], Dqs[valid], 'bo-', markersize=4)
-            
-            if 0 in q_values:
-                plt.axhline(y=Dqs[np.searchsorted(q_values, 0)], color='r', linestyle='--', 
-                           label=f"D(0) = {Dqs[np.searchsorted(q_values, 0)]:.4f}")
-            
-            plt.xlabel('q')
-            plt.ylabel('D(q)')
-            plt.title(f'Generalized Dimensions D(q) at t = {data["time"]:.2f}')
-            plt.grid(True)
-            plt.legend()
-            plt.savefig(os.path.join(output_dir, "multifractal_dimensions.png"), dpi=300)
-            plt.close()
-            
-            # Plot f(alpha) vs alpha (multifractal spectrum)
-            plt.figure(figsize=(10, 6))
-            valid = ~np.isnan(alpha) & ~np.isnan(f_alpha)
-            plt.plot(alpha[valid], f_alpha[valid], 'bo-', markersize=4)
-            
-            # Add selected q values as annotations
-            q_to_highlight = [-5, -2, 0, 2, 5]
-            for q_val in q_to_highlight:
-                if q_val in q_values:
-                    idx = np.searchsorted(q_values, q_val)
-                    if idx < len(q_values) and valid[idx]:
-                        plt.annotate(f"q={q_values[idx]}", 
-                                    (alpha[idx], f_alpha[idx]),
-                                    xytext=(5, 0), textcoords='offset points')
-            
-            plt.xlabel('α')
-            plt.ylabel('f(α)')
-            plt.title(f'Multifractal Spectrum f(α) at t = {data["time"]:.2f}')
-            plt.grid(True)
-            plt.savefig(os.path.join(output_dir, "multifractal_spectrum.png"), dpi=300)
-            plt.close()
-            
-            # Plot R² values
-            plt.figure(figsize=(10, 6))
-            valid = ~np.isnan(r_squared)
-            plt.plot(q_values[valid], r_squared[valid], 'go-', markersize=4)
-            plt.xlabel('q')
-            plt.ylabel('R²')
-            plt.title(f'Fit Quality for Different q Values at t = {data["time"]:.2f}')
-            plt.grid(True)
-            plt.savefig(os.path.join(output_dir, "multifractal_r_squared.png"), dpi=300)
-            plt.close()
-            
-            # Save results to CSV
-            import pandas as pd
-            results_df = pd.DataFrame({
-                'q': q_values,
-                'tau': taus,
-                'Dq': Dqs,
-                'alpha': alpha,
-                'f_alpha': f_alpha,
-                'r_squared': r_squared
-            })
-            results_df.to_csv(os.path.join(output_dir, "multifractal_results.csv"), index=False)
-            
-            # Save multifractal parameters
-            params_df = pd.DataFrame({
-                'Parameter': ['Time', 'D0', 'D1', 'D2', 'alpha_width', 'degree_multifractality'],
-                'Value': [data['time'], D0, D1, D2, alpha_width, degree_multifractality]
-            })
-            params_df.to_csv(os.path.join(output_dir, "multifractal_parameters.csv"), index=False)
-        
-        # Return results
-        return {
-            'q_values': q_values,
-            'tau': taus,
-            'Dq': Dqs,
-            'alpha': alpha,
-            'f_alpha': f_alpha,
-            'r_squared': r_squared,
-            'D0': D0,
-            'D1': D1,
-            'D2': D2,
-            'alpha_width': alpha_width,
-            'degree_multifractality': degree_multifractality,
-            'time': data['time']
-        }
-    
-    def analyze_multifractal_evolution(self, vtk_files, output_dir=None, q_values=None):
-        """
-        Analyze how multifractal properties evolve over time or across resolutions.
-        
-        Args:
-            vtk_files: Dict mapping either times or resolutions to VTK files
-                      e.g. {0.1: 'RT_t0.1.vtk', 0.2: 'RT_t0.2.vtk'} for time series
-                      or {100: 'RT100x100.vtk', 200: 'RT200x200.vtk'} for resolutions
-            output_dir: Directory to save results
-            q_values: List of q moments to analyze (default: -5 to 5 in 0.5 steps)
-            
-        Returns:
-            dict: Multifractal evolution results
-        """
-        if output_dir:
-            os.makedirs(output_dir, exist_ok=True)
-        
-        # Set default q values if not provided
-        if q_values is None:
-            q_values = np.arange(-5, 5.1, 0.5)
-        
-        # Determine type of analysis (time or resolution)
-        keys = list(vtk_files.keys())
-        is_time_series = all(isinstance(k, float) for k in keys)
-        
-        if is_time_series:
-            print(f"Analyzing multifractal evolution over time series: {sorted(keys)}")
-            x_label = 'Time'
-            series_name = "time"
-        else:
-            print(f"Analyzing multifractal evolution across resolutions: {sorted(keys)}")
-            x_label = 'Resolution'
-            series_name = "resolution"
-        
-        # Initialize results storage
-        results = []
-        
-        # Process each file
-        for key, vtk_file in sorted(vtk_files.items()):
-            print(f"\nProcessing {series_name} = {key}, file: {vtk_file}")
-            
-            try:
-                # Read VTK file
-                data = self.read_vtk_file(vtk_file)
-                
-                # Create subdirectory for this point
-                if output_dir:
-                    point_dir = os.path.join(output_dir, f"{series_name}_{key}")
-                    os.makedirs(point_dir, exist_ok=True)
-                else:
-                    point_dir = None
-                
-                # Perform multifractal analysis
-                mf_results = self.compute_multifractal_spectrum(data, q_values=q_values, output_dir=point_dir)
-                
-                if mf_results:
-                    # Store results with the key (time or resolution)
-                    mf_results[series_name] = key
-                    results.append(mf_results)
-                
-            except Exception as e:
-                print(f"Error processing {vtk_file}: {str(e)}")
-                import traceback
-                traceback.print_exc()
-        
-        # Create summary plots
-        if results and output_dir:
-            # Extract evolution of key parameters
-            x_values = [res[series_name] for res in results]
-            D0_values = [res['D0'] for res in results]
-            D1_values = [res['D1'] for res in results]
-            D2_values = [res['D2'] for res in results]
-            alpha_width = [res['alpha_width'] for res in results]
-            degree_mf = [res['degree_multifractality'] for res in results]
-            
-            # Plot generalized dimensions evolution
-            plt.figure(figsize=(10, 6))
-            plt.plot(x_values, D0_values, 'bo-', label='D(0) - Capacity dimension')
-            plt.plot(x_values, D1_values, 'ro-', label='D(1) - Information dimension')
-            plt.plot(x_values, D2_values, 'go-', label='D(2) - Correlation dimension')
-            plt.xlabel(x_label)
-            plt.ylabel('Generalized Dimensions')
-            plt.title(f'Evolution of Generalized Dimensions with {x_label}')
-            plt.grid(True)
-            plt.legend()
-            plt.savefig(os.path.join(output_dir, "dimensions_evolution.png"), dpi=300)
-            plt.close()
-            
-            # Plot multifractal parameters evolution
-            plt.figure(figsize=(10, 6))
-            plt.plot(x_values, alpha_width, 'ms-', label='α width')
-            plt.plot(x_values, degree_mf, 'cd-', label='Degree of multifractality')
-            plt.xlabel(x_label)
-            plt.ylabel('Parameter Value')
-            plt.title(f'Evolution of Multifractal Parameters with {x_label}')
-            plt.grid(True)
-            plt.legend()
-            plt.savefig(os.path.join(output_dir, "multifractal_params_evolution.png"), dpi=300)
-            plt.close()
-            
-            # Create 3D surface plot of D(q) evolution if matplotlib supports it
-            try:
-                from mpl_toolkits.mplot3d import Axes3D
-                
-                # Prepare data for 3D plot
-                X, Y = np.meshgrid(x_values, q_values)
-                Z = np.zeros((len(q_values), len(x_values)))
-                
-                for i, result in enumerate(results):
-                    for j, q in enumerate(q_values):
-                        q_idx = np.where(result['q_values'] == q)[0]
-                        if len(q_idx) > 0:
-                            Z[j, i] = result['Dq'][q_idx[0]]
-                
-                # Create 3D plot
-                fig = plt.figure(figsize=(12, 8))
-                ax = fig.add_subplot(111, projection='3d')
-                surf = ax.plot_surface(X, Y, Z, cmap='viridis', edgecolor='none', alpha=0.8)
-                
-                ax.set_xlabel(x_label)
-                ax.set_ylabel('q')
-                ax.set_zlabel('D(q)')
-                ax.set_title(f'Evolution of D(q) Spectrum with {x_label}')
-                
-                fig.colorbar(surf, ax=ax, shrink=0.5, aspect=5, label='D(q)')
-                plt.savefig(os.path.join(output_dir, "Dq_evolution_3D.png"), dpi=300)
-                plt.close()
-                
-            except Exception as e:
-                print(f"Error creating 3D plot: {str(e)}")
-            
-            # Save summary CSV
-            import pandas as pd
-            summary_df = pd.DataFrame({
-                series_name: x_values,
-                'D0': D0_values,
-                'D1': D1_values,
-                'D2': D2_values,
-                'alpha_width': alpha_width,
-                'degree_multifractality': degree_mf
-            })
-            summary_df.to_csv(os.path.join(output_dir, "multifractal_evolution_summary.csv"), index=False)
-        
-        return results
+                # Use legacy analysis
+                subdir = os.path.join(args.output_dir, "single_file_analysis")
+                os.makedirs(subdir, exist_ok=True)
+
+                result = analyzer.analyze_vtk_file_legacy(
+                    args.file,
+                    subdir,
+                    mixing_method=args.mixing_method,
+                    h0=args.h0,
+                    min_box_size=args.min_box_size
+                )
+
+                print(f"\nResults for {args.file}:")
+                print(f"  Time: {result['time']:.6f}")
+                print(f"  Mixing thickness: {result['h_total']:.6f}")
+                print(f"  Fractal dimension: {result['fractal_dim']:.6f} ± {result['fd_error']:.6f}")
+                print(f"  R²: {result['fd_r_squared']:.6f}")
+
+        elif args.pattern:
+            # Process time series
+            print(f"\nProcessing time series with pattern: {args.pattern}")
+            df = analyzer.process_vtk_series(
+                args.pattern,
+                mixing_method=args.mixing_method
+            )
+
+            if df is not None:
+                print(f"\nTime series analysis complete:")
+                print(f"  Processed {len(df)} files")
+                print(f"  Time range: {df['time'].min():.3f} to {df['time'].max():.3f}")
+                print(f"  Final mixing thickness: {df['h_total'].iloc[-1]:.6f}")
+                print(f"  Final fractal dimension: {df['fractal_dim'].iloc[-1]:.6f}")
+
+    except Exception as e:
+        print(f"Error during analysis: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return 1
+
+    print(f"\nAnalysis complete. Results saved to: {args.output_dir}")
+    return 0
+
+if __name__ == "__main__":
+    exit(main())

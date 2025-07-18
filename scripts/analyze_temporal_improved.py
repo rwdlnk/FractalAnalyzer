@@ -5,7 +5,7 @@ import argparse
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from rt_analyzer import RTAnalyzer
+from fractal_analyzer import RTAnalyzer
 
 def find_vtk_files_with_times(base_pattern, target_times=None):
     """
@@ -66,7 +66,8 @@ def find_vtk_files_with_times(base_pattern, target_times=None):
         return sorted(closest_matches, key=lambda x: x[0])
 
 def analyze_temporal_evolution(output_dir, resolutions, base_pattern=None, specific_times=None, 
-                              time_tolerance=0.5, auto_detect_times=False):
+                              time_tolerance=0.5, auto_detect_times=False, mixing_method='dalziel',h0=0.5,
+							  use_grid_optimization=False, min_box_size=None, no_titles=False):
     """Analyze fractal dimension evolution over time for different resolutions."""
     # Create output directory
     os.makedirs(output_dir, exist_ok=True)
@@ -76,20 +77,28 @@ def analyze_temporal_evolution(output_dir, resolutions, base_pattern=None, speci
     
     # Process each resolution
     for resolution in resolutions:
-        print(f"\n=== Analyzing temporal evolution for {resolution}x{resolution} resolution ===\n")
+        print(f"\n\n\n=== Analyzing temporal evolution for {resolution}x{resolution} resolution ===\n")
         
         # Create analyzer instance for this resolution
         res_dir = os.path.join(output_dir, f'res_{resolution}')
-        analyzer = RTAnalyzer(res_dir)
+        analyzer = RTAnalyzer(res_dir, use_grid_optimization=use_grid_optimization, no_titles=no_titles)
         
         # Create pattern for this resolution
         if base_pattern:
-            pattern = base_pattern.format(resolution=resolution)
+           pattern = base_pattern.format(resolution=resolution)
         else:
-            pattern = f"../{resolution}x{resolution}/RT{resolution}x{resolution}-*.vtk"
-        
+            pattern = f"./{resolution}x{resolution}/RT{resolution}x{resolution}-*.vtk"  # Changed ../ to ./
         print(f"Using pattern: {pattern}")
-        
+
+        # Check if resolution directory exists
+		# Extract directory from pattern instead of assuming local directory
+        pattern_dir = os.path.dirname(pattern)
+        if not os.path.exists(pattern_dir):
+            print(f"Warning: Directory {pattern_dir} does not exist. Skipping {resolution}x{resolution}")
+            continue
+        else:
+            print(f"Found directory: {pattern_dir}")
+
         # Find VTK files and their times
         if specific_times:
             # Find closest matches to specific times
@@ -136,38 +145,37 @@ def analyze_temporal_evolution(output_dir, resolutions, base_pattern=None, speci
         
         # Process each file
         for i, (actual_time, vtk_file) in enumerate(file_time_pairs):
-            print(f"Processing file {i+1}/{len(file_time_pairs)}: {os.path.basename(vtk_file)} (t={actual_time:.3f})")
-            
+            print(f"\n\nProcessing file {i+1}/{len(file_time_pairs)}: {os.path.basename(vtk_file)} (t={actual_time:.3f})")
+
             try:
-                # Read the VTK file
-                data = analyzer.read_vtk_file(vtk_file)
-                
-                # Find initial interface position
-                h0 = analyzer.find_initial_interface(data)
-                
-                # Calculate mixing thickness
-                mixing = analyzer.compute_mixing_thickness(data, h0)
-                
-                # Calculate fractal dimension
-                fd_results = analyzer.compute_fractal_dimension(data)
-                
-                # Store results
+                # Use the complete analysis method instead of separate calls
+                result = analyzer.analyze_vtk_file(vtk_file, mixing_method=mixing_method, h0=h0,
+				min_box_size=min_box_size)
+    
+                # Store results directly from the complete analysis
                 results.append({
                     'time': actual_time,
                     'h0': h0,
-                    'ht': mixing['ht'],
-                    'hb': mixing['hb'],
-                    'h_total': mixing['h_total'],
-                    'fractal_dim': fd_results['dimension'],
-                    'fd_error': fd_results['error'],
-                    'fd_r_squared': fd_results['r_squared'],
+                    'ht': result['ht'],
+                    'hb': result['hb'],
+                    'h_total': result['h_total'],
+                    'fractal_dim': result['fractal_dim'],
+                    'fd_error': result['fd_error'],
+                    'fd_r_squared': result['fd_r_squared'],
                     'resolution': resolution,
                     'vtk_file': vtk_file
                 })
-                
-                print(f"  Time: {actual_time:.3f}, Dimension: {fd_results['dimension']:.4f}, "
-                      f"Mixing: {mixing['h_total']:.4f}, R²: {fd_results['r_squared']:.4f}")
-                
+    
+                print(f"  Time: {actual_time:.3f}, Dimension: {result['fractal_dim']:.4f}, "
+                      f"Mixing: {result['h_total']:.4f}, R²: {result['fd_r_squared']:.4f}")
+    
+                # Validate results
+                if not (1.0 <= result['fractal_dim'] <= 2.0):
+                    print(f"  Warning: Fractal dimension {result['fractal_dim']:.3f} outside physical range [1.0, 2.0]")
+    
+                if result['h_total'] <= 0:
+                    print(f"  Warning: Non-positive mixing thickness {result['h_total']:.6f}")
+
             except Exception as e:
                 print(f"Error processing {vtk_file}: {str(e)}")
                 import traceback
@@ -184,7 +192,7 @@ def analyze_temporal_evolution(output_dir, resolutions, base_pattern=None, speci
             df.to_csv(os.path.join(res_dir, 'temporal_evolution.csv'), index=False)
             
             # Create individual plots for this resolution
-            plot_single_resolution_evolution(df, resolution, res_dir)
+            plot_single_resolution_evolution(df, resolution, res_dir, no_titles)
             
             print(f"Completed {resolution}x{resolution}: {len(results)} time points analyzed")
         else:
@@ -192,7 +200,7 @@ def analyze_temporal_evolution(output_dir, resolutions, base_pattern=None, speci
     
     # Create combined plots across resolutions
     if all_results:
-        plot_multi_resolution_evolution(all_results, resolutions, output_dir)
+        plot_multi_resolution_evolution(all_results, resolutions, output_dir, no_titles)
         
         # Create summary CSV with all results
         create_combined_summary(all_results, output_dir)
@@ -227,7 +235,7 @@ def create_combined_summary(all_results, output_dir):
     
     print(f"Combined summary saved with {len(combined_data)} total analyses")
 
-def plot_single_resolution_evolution(df, resolution, output_dir):
+def plot_single_resolution_evolution(df, resolution, output_dir, no_titles=False):
     """Create plots for a single resolution's temporal evolution."""
     # Plot fractal dimension vs time
     plt.figure(figsize=(10, 6))
@@ -235,7 +243,8 @@ def plot_single_resolution_evolution(df, resolution, output_dir):
                 fmt='o-', capsize=3, linewidth=2, markersize=5)
     plt.xlabel('Time')
     plt.ylabel('Fractal Dimension')
-    plt.title(f'Fractal Dimension Evolution ({resolution}x{resolution})')
+    if not no_titles:
+        plt.title(f'Fractal Dimension Evolution ({resolution}x{resolution})')
     plt.grid(True)
     
     # Add trend line if enough points
@@ -258,7 +267,8 @@ def plot_single_resolution_evolution(df, resolution, output_dir):
     plt.plot(df['time'], df['hb'], 'g--', label='Lower', linewidth=2)
     plt.xlabel('Time')
     plt.ylabel('Mixing Layer Thickness')
-    plt.title(f'Mixing Layer Evolution ({resolution}x{resolution})')
+    if not no_titles:
+        plt.title(f'Mixing Layer Evolution ({resolution}x{resolution})')
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
@@ -286,13 +296,14 @@ def plot_single_resolution_evolution(df, resolution, output_dir):
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
     
-    plt.title(f'Fractal Dimension and Mixing Layer Evolution ({resolution}x{resolution})')
+    if not no_titles:
+        plt.title(f'Fractal Dimension and Mixing Layer Evolution ({resolution}x{resolution})')
     plt.grid(True)
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, 'combined_evolution.png'), dpi=300)
     plt.close()
 
-def plot_multi_resolution_evolution(all_results, resolutions, output_dir):
+def plot_multi_resolution_evolution(all_results, resolutions, output_dir, no_titles=False):
     """Create plots comparing temporal evolution across multiple resolutions."""
     # Create output directory
     multi_res_dir = os.path.join(output_dir, 'multi_resolution')
@@ -318,7 +329,8 @@ def plot_multi_resolution_evolution(all_results, resolutions, output_dir):
     
     plt.xlabel('Time')
     plt.ylabel('Fractal Dimension')
-    plt.title('Fractal Dimension Evolution Across Resolutions')
+    if not no_titles:
+        plt.title('Fractal Dimension Evolution Across Resolutions')
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
@@ -340,7 +352,8 @@ def plot_multi_resolution_evolution(all_results, resolutions, output_dir):
     
     plt.xlabel('Time')
     plt.ylabel('Mixing Layer Thickness')
-    plt.title('Mixing Layer Evolution Across Resolutions')
+    if not no_titles:
+        plt.title('Mixing Layer Evolution Across Resolutions')
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
@@ -375,14 +388,16 @@ def plot_multi_resolution_evolution(all_results, resolutions, output_dir):
     
     plt.xlabel('Mixing Layer Thickness')
     plt.ylabel('Fractal Dimension')
-    plt.title('Phase Portrait: Fractal Dimension vs. Mixing Layer Thickness')
+    if not no_titles:
+        plt.title('Phase Portrait: Fractal Dimension vs. Mixing Layer Thickness')
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
     plt.savefig(os.path.join(multi_res_dir, 'phase_portrait.png'), dpi=300)
     plt.close()
 
-if __name__ == "__main__":
+def main():
+    """Main function for console script entry point."""
     parser = argparse.ArgumentParser(description='Analyze fractal dimension temporal evolution with improved file finding')
     parser.add_argument('--resolutions', '-r', type=int, nargs='+', required=True,
                       help='Resolutions to analyze (e.g., 100 200 400 800)')
@@ -392,13 +407,48 @@ if __name__ == "__main__":
                       help='Pattern for VTK files with {resolution} placeholder')
     parser.add_argument('--times', type=float, nargs='*',
                       help='Specific time points to analyze (optional)')
+    
+    # New time range options
+    parser.add_argument('--time-start', type=float, default=0.0,
+                      help='Start time for automatic time sequence (default: 0.0)')
+    parser.add_argument('--time-end', type=float, default=None,
+                      help='End time for automatic time sequence (required with --time-step)')
+    parser.add_argument('--time-step', type=float, default=None,
+                      help='Time step for automatic time sequence (e.g., 0.1)')
+    
     parser.add_argument('--auto-times', action='store_true',
                       help='Auto-detect reasonable time range for analysis')
     parser.add_argument('--time-tolerance', type=float, default=0.5,
                       help='Maximum time difference for matching files (default: 0.5)')
+    parser.add_argument('--mixing-method', default='dalziel', 
+                      choices=['geometric', 'statistical', 'dalziel'],
+                      help='Method for computing mixing layer thickness (default: dalziel)')
+    parser.add_argument('--h0', type=float, default=0.5,
+                      help='Initial interface position in physical coordinates (default: 0.5)')
+    parser.add_argument('--disable-grid-optimization', action='store_true',
+                      help='Disable grid optimization (use basic method)')
+    parser.add_argument('--min-box-size', type=float, default=None,
+                      help='Minimum box size for fractal analysis (default: auto)')
+    parser.add_argument('--no-titles', action='store_true',
+                      help='Disable plot titles for journal submissions')
     
     args = parser.parse_args()
     
+    # Generate time sequence if time-step is specified
+    if args.time_step is not None:
+        if args.time_end is None:
+            parser.error("--time-end is required when using --time-step")
+        if args.times is not None:
+            parser.error("Cannot use both --times and --time-step")
+        
+        # Generate time sequence using numpy arange
+        args.times = np.arange(args.time_start, args.time_end + args.time_step/2, args.time_step).tolist()
+        print(f"Generated time sequence: {len(args.times)} points from {args.time_start} to {args.time_end} with step {args.time_step}")
+        print(f"Times: {args.times[:10]}{'...' if len(args.times) > 10 else ''}")
+    
+    # Convert disable flag to use flag
+    use_grid_optimization = not args.disable_grid_optimization
+
     # Run analysis
     results = analyze_temporal_evolution(
         args.output, 
@@ -406,7 +456,12 @@ if __name__ == "__main__":
         args.pattern, 
         args.times,
         args.time_tolerance,
-        args.auto_times
+        args.auto_times,
+        args.mixing_method,
+        args.h0,
+        use_grid_optimization,
+        args.min_box_size,
+        args.no_titles
     )
     
     if results:
@@ -424,3 +479,6 @@ if __name__ == "__main__":
             print(f"  {resolution}x{resolution}: {len(df)} points, t={time_range}, avg D={avg_dim:.3f}")
     else:
         print("Analysis failed - check file paths and parameters")
+
+if __name__ == "__main__":
+    main()

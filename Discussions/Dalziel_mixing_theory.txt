@@ -1,0 +1,186 @@
+# Dalziel Mixing Layer Theory and Implementation
+
+## Physical Setup
+
+**Rayleigh-Taylor Instability Configuration:**
+- Heavy fluid (density ρ₁) initially on top
+- Light fluid (density ρ₀) initially on bottom  
+- Initial interface at z = 0 (Dalziel coordinates)
+- Atwood number: A = (ρ₁ - ρ₀)/(ρ₁ + ρ₀)
+- Dimensionless time: τ = t√(Ag/H)
+
+**Concentration Field:**
+- c₁(x,z,t) = local fraction of heavy fluid (0 ≤ c₁ ≤ 1)
+- c₁ = 1: pure heavy fluid
+- c₁ = 0: pure light fluid  
+- c₁ = 0.5: equal mixture
+
+## Dalziel's Mixing Thickness Definitions
+
+### Notation Convention
+- First subscript: fluid type (1 = heavy fluid, 0 = light fluid)
+- Second subscript: region (1 = above interface, 0 = below interface)
+
+### Equations 6 & 7: Mixing-Weighted Penetration
+
+**Heavy fluid above interface (Eq. 6):**
+```
+h₁,₁ = ∫₀^∞ ∫₋∞^∞ c₁(x,z,t)[1-c₁(x,z,t)] dx dz
+```
+
+**Heavy fluid below interface (Eq. 7):**
+```
+h₁,₀ = ∫₋∞^0 ∫₋∞^∞ c₁(x,z,t)[1-c₁(x,z,t)] dx dz
+```
+
+### Physical Interpretation of c₁(1-c₁) Integrand
+
+**Mixing Intensity Function:**
+- c₁(1-c₁) = 0 when c₁ = 0 or c₁ = 1 (pure fluids, no mixing)
+- c₁(1-c₁) = 0.25 when c₁ = 0.5 (maximum mixing, 50-50 mixture)
+- c₁(1-c₁) weights regions by their degree of mixing
+
+**What This Measures:**
+The integrand c₁(1-c₁) identifies and weights regions where **actual mixing** has occurred, rather than simple fluid penetration. This distinguishes between:
+
+1. **Unmixed penetration**: Heavy fluid finger penetrating but remaining pure (c₁ ≈ 1) → contributes ≈ 0
+2. **True mixing**: Regions with intermediate concentrations (0.2 < c₁ < 0.8) → significant contribution
+3. **Light fluid regions**: Pure light fluid (c₁ ≈ 0) → contributes ≈ 0
+
+## Alternative Interpretation: Simple Penetration
+
+**Mass-Based Penetration (your current approach):**
+```
+h₁,₁^(mass) = ∫₀^(H/2) c̄₁(z,t) dz
+h₁,₀^(mass) = ∫₋(H/2)^0 c̄₁(z,t) dz
+```
+
+Where c̄₁(z,t) = (1/L)∫₀^L c₁(x,z,t) dx is the horizontally-averaged concentration.
+
+**Physical Meaning:**
+- h₁,₁^(mass): Total amount of heavy fluid above initial interface (mixed + unmixed)
+- h₁,₀^(mass): Total amount of heavy fluid below initial interface (mixed + unmixed)
+
+## Key Differences Between Methods
+
+| Method | Integrand | Physical Meaning | Weighting |
+|--------|-----------|------------------|-----------|
+| **Dalziel** | c₁(1-c₁) | Mixing-weighted penetration | Emphasizes mixed regions |
+| **Mass-based** | c₁ | Total fluid penetration | Counts all fluid equally |
+
+### Example Comparison
+Consider a heavy fluid finger with c₁ = 0.9 penetrating into light fluid:
+
+- **Dalziel weight**: 0.9 × (1-0.9) = 0.09 (low contribution)
+- **Mass weight**: 0.9 (high contribution)
+
+The Dalziel method "discounts" this penetration because it represents invasion without significant mixing.
+
+## Implementation in Your Code
+
+### Method 1: Dalziel's Mixing-Weighted (Equations 6-7)
+```python
+def compute_dalziel_mixing_weighted(self, data, h0):
+    """Compute h₁,₁ and h₁,₀ using c₁(1-c₁) weighting"""
+    
+    # Get concentration field and coordinates
+    f = data['f']  # Your concentration field (heavy fluid fraction)
+    y_values = data['y'][0, :]  # y-coordinates
+    x_values = data['x'][:, 0]  # x-coordinates
+    
+    # Transform to Dalziel coordinates (z = y - h0)
+    z_values = y_values - h0
+    
+    # Grid spacing
+    dx = np.abs(np.diff(x_values)[0])
+    dz = np.abs(np.diff(z_values)[0])
+    
+    # Compute mixing intensity: c₁(1-c₁)
+    mixing_intensity = f * (1.0 - f)
+    
+    # Split domain at interface
+    above_interface = z_values > 0
+    below_interface = z_values < 0
+    
+    # Dalziel h₁,₁: mixing-weighted heavy fluid above interface
+    if np.any(above_interface):
+        region_above = mixing_intensity[:, above_interface]
+        h_11_dalziel = np.sum(region_above) * dx * dz
+    else:
+        h_11_dalziel = 0.0
+    
+    # Dalziel h₁,₀: mixing-weighted heavy fluid below interface  
+    if np.any(below_interface):
+        region_below = mixing_intensity[:, below_interface]
+        h_10_dalziel = np.sum(region_below) * dx * dz
+    else:
+        h_10_dalziel = 0.0
+    
+    return {
+        'h_11_dalziel': h_11_dalziel,
+        'h_10_dalziel': h_10_dalziel,
+        'h_11_normalized': h_11_dalziel / (0.5 * H),  # For comparison with Fig 14
+        'h_10_normalized': h_10_dalziel / (0.5 * H),
+        'method': 'dalziel_mixing_weighted'
+    }
+```
+
+### Method 2: Mass-Based Penetration (Your Current Approach)
+```python
+def compute_mass_based_penetration(self, data, h0):
+    """Compute h₁,₁ and h₁,₀ using simple mass integration"""
+    
+    # Horizontal average
+    f_avg = np.mean(data['f'], axis=0)
+    y_values = data['y'][0, :]
+    
+    # Transform to Dalziel coordinates
+    z_values = y_values - h0
+    dz = np.abs(np.diff(z_values)[0])
+    
+    # Split domain at interface
+    above_interface = z_values > 0
+    below_interface = z_values < 0
+    
+    # Mass-based h₁,₁: total heavy fluid above interface
+    if np.any(above_interface):
+        h_11_mass = np.sum(f_avg[above_interface]) * dz
+    else:
+        h_11_mass = 0.0
+    
+    # Mass-based h₁,₀: total heavy fluid below interface
+    if np.any(below_interface):
+        h_10_mass = np.sum(f_avg[below_interface]) * dz
+    else:
+        h_10_mass = 0.0
+    
+    return {
+        'h_11_mass': h_11_mass,
+        'h_10_mass': h_10_mass,
+        'h_11_normalized': h_11_mass / (0.5 * H),
+        'h_10_normalized': h_10_mass / (0.5 * H),
+        'method': 'mass_based_penetration'
+    }
+```
+
+## Expected Differences in Results
+
+**Hypothesis for Your Data (τ ≈ 2.0):**
+
+1. **Mass-based method** will give larger values because it counts all heavy fluid penetration
+2. **Dalziel's method** will give smaller values because it emphasizes only well-mixed regions
+3. **Figure 14 agreement** should be better with Dalziel's mixing-weighted approach
+
+**Physical Reasoning:**
+At τ ≈ 2.0, RT instability likely shows significant penetration with varying degrees of local mixing. Heavy fluid fingers may penetrate deep but remain relatively unmixed, leading to:
+- High mass-based h₁,₁ (counts the fingers fully)
+- Lower Dalziel h₁,₁ (discounts unmixed finger cores)
+
+## Validation Strategy
+
+1. **Implement both methods** and compare results
+2. **Plot mixing intensity** c₁(1-c₁) to visualize where mixing occurs
+3. **Compare temporal evolution** of both measures against Figure 14
+4. **Resolution study** to ensure grid independence
+
+This dual approach will help determine which interpretation of Dalziel's method matches their experimental results and provides insight into the physics of RT mixing.

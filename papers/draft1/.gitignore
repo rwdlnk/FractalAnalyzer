@@ -1,0 +1,37 @@
+# On the papers branch
+git checkout -b papers
+
+# Create your structure
+mkdir -p papers/draft1/{figures,data}
+cd papers/draft1
+
+# Add your LaTeX files
+# (copy your .tex and .bib files here)
+
+# Create papers-specific .gitignore
+cat > .gitignore << EOF
+# LaTeX auxiliary files
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
+*.lof
+*.lot
+
+# Generated PDFs (optional - you might want to track these)
+# *.pdf
+
+# Editor files
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+EOF
