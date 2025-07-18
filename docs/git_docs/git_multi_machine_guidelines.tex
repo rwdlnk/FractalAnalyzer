@@ -1,0 +1,343 @@
+\documentclass[11pt,letterpaper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{fancyhdr}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{enumitem}
+
+% Code formatting
+\lstset{
+    basicstyle=\ttfamily\small,
+    backgroundcolor=\color{gray!10},
+    frame=single,
+    breaklines=true,
+    showstringspaces=false,
+    columns=flexible,
+    commentstyle=\color{green!50!black},
+    keywordstyle=\color{blue},
+    stringstyle=\color{red},
+}
+
+% Header/Footer
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{FractalAnalyzer Development}
+\fancyhead[R]{Multi-Machine Git Guidelines}
+\fancyfoot[C]{\thepage}
+
+\title{\textbf{Multi-Machine Git Branching Guidelines\\for FractalAnalyzer Development}}
+\author{Rod Douglass}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Overview}
+
+This document provides comprehensive guidelines for managing FractalAnalyzer development across multiple computing platforms (laptop, desktop, HPC systems) using Git branching strategies. The goal is to maintain code synchronization while avoiding conflicts and preserving development history.
+
+\section{Development Environment}
+
+\subsection{Current Setup}
+\begin{itemize}
+    \item \textbf{Main Repository}: \texttt{github.com/rwdlnk/Fractal\_Analyzer}
+    \item \textbf{Package Structure}: Reorganized v2.0.0 with two-tier analysis system
+    \item \textbf{Computing Platforms}: 
+    \begin{itemize}
+        \item Laptop (primary development)
+        \item Desktop (computational analysis)
+        \item Future: HPC systems for large-scale simulations
+    \end{itemize}
+\end{itemize}
+
+\subsection{Package Organization}
+\begin{lstlisting}[language=bash]
+FractalAnalyzer/
+├── fractal_analyzer/
+│   ├── core/           # Foundation components
+│   ├── analysis/       # Tier 1: General RT analysis
+│   ├── validation/     # Tier 2: Dalziel validation
+│   ├── utils/          # Supporting utilities
+│   └── legacy/         # Archived code
+├── papers/             # Research publications
+├── scripts/            # Command-line tools
+└── tests/              # Test suite
+\end{lstlisting}
+
+\section{Branching Strategies}
+
+\subsection{Strategy 1: Shared Feature Branch (High Coordination)}
+
+\textbf{Use Case}: When you want to see changes from other machines immediately.
+
+\textbf{Workflow}:
+\begin{lstlisting}[language=bash]
+# Machine A - Start new feature
+git checkout main
+git pull origin main
+git checkout -b feature/enhanced-temporal-analysis
+
+# Do work, commit frequently
+git add -A
+git commit -m "Add temporal evolution improvements"
+git push origin feature/enhanced-temporal-analysis
+
+# Machine B - Continue same feature
+git checkout feature/enhanced-temporal-analysis
+git pull origin feature/enhanced-temporal-analysis
+# Work continues seamlessly with Machine A's changes
+\end{lstlisting}
+
+\textbf{Critical Requirements}:
+\begin{itemize}[label=\textbullet]
+    \item \textcolor{red}{\textbf{ALWAYS}} \texttt{git pull} before starting work
+    \item \textcolor{red}{\textbf{ALWAYS}} \texttt{git push} when stopping work
+    \item \textcolor{red}{\textbf{NEVER}} leave uncommitted changes when switching machines
+    \item \textcolor{red}{\textbf{COMMIT}} frequently to minimize conflicts
+\end{itemize}
+
+\subsection{Strategy 2: Machine-Specific Branches (Clean Separation)}
+
+\textbf{Use Case}: When you want complete independence between machines.
+
+\textbf{Workflow}:
+\begin{lstlisting}[language=bash]
+# Laptop development
+git checkout -b feature/enhanced-analyzer-laptop
+
+# Desktop development  
+git checkout -b feature/enhanced-analyzer-desktop
+
+# When ready to integrate
+git checkout main
+git merge feature/enhanced-analyzer-laptop
+git merge feature/enhanced-analyzer-desktop
+git push origin main
+
+# Clean up branches
+git branch -d feature/enhanced-analyzer-laptop
+git branch -d feature/enhanced-analyzer-desktop
+\end{lstlisting}
+
+\textbf{Advantages}:
+\begin{itemize}[label=\checkmark]
+    \item No coordination required
+    \item No risk of conflicts during development
+    \item Clean, isolated development environments
+\end{itemize}
+
+\textbf{Disadvantages}:
+\begin{itemize}[label=\textbullet]
+    \item Cannot see other machine's progress until merge
+    \item Potential for duplicate work
+    \item More complex integration at end
+\end{itemize}
+
+\subsection{Strategy 3: Hybrid Approach (Recommended)}
+
+\textbf{Use Case}: Best of both worlds - coordination with safety.
+
+\textbf{Workflow}:
+\begin{lstlisting}[language=bash]
+# Start with shared feature branch
+git checkout -b feature/dalziel-validation-improvements
+
+# Create machine-specific sub-branches
+# On laptop:
+git checkout -b feature/dalziel-validation-laptop
+
+# On desktop:
+git checkout -b feature/dalziel-validation-desktop
+
+# Periodic synchronization (e.g., daily)
+# Laptop pushes to shared branch:
+git checkout feature/dalziel-validation-laptop
+git commit -am "Laptop: Add power spectrum analysis"
+git checkout feature/dalziel-validation-improvements
+git merge feature/dalziel-validation-laptop
+git push origin feature/dalziel-validation-improvements
+
+# Desktop pulls integrated work:
+git checkout feature/dalziel-validation-improvements
+git pull origin feature/dalziel-validation-improvements
+git checkout feature/dalziel-validation-desktop
+git merge feature/dalziel-validation-improvements
+# Desktop now has laptop's work + can continue independently
+\end{lstlisting}
+
+\section{Branch Naming Conventions}
+
+\subsection{Feature Development}
+\begin{lstlisting}[language=bash]
+feature/enhanced-analyzer-improvements
+feature/dalziel-validation-updates
+feature/multifractal-analysis
+feature/performance-optimization
+\end{lstlisting}
+
+\subsection{Bug Fixes}
+\begin{lstlisting}[language=bash]
+fix/import-error-core-modules
+fix/vtk-reader-memory-leak
+fix/convergence-analysis-edge-case
+\end{lstlisting}
+
+\subsection{Research/Papers}
+\begin{lstlisting}[language=bash]
+paper/validation-results-2025
+research/temporal-evolution-study
+paper/jfm-submission-rev1
+\end{lstlisting}
+
+\subsection{Machine-Specific (when using Strategy 2 or 3)}
+\begin{lstlisting}[language=bash]
+feature/enhanced-analyzer-laptop
+feature/enhanced-analyzer-desktop
+feature/enhanced-analyzer-hpc
+\end{lstlisting}
+
+\section{Best Practices}
+
+\subsection{Before Starting Work (Any Strategy)}
+\begin{lstlisting}[language=bash]
+# Check current status
+git status
+
+# Ensure you're on the right branch
+git branch
+
+# Get latest changes
+git pull origin <branch-name>
+
+# Verify package installation is current
+python -c "import fractal_analyzer; print(f'v{fractal_analyzer.__version__}')"
+\end{lstlisting}
+
+\subsection{During Development}
+\begin{itemize}
+    \item \textbf{Commit Early, Commit Often}: Small, logical commits with clear messages
+    \item \textbf{Test Imports}: Ensure package structure remains intact
+    \item \textbf{Document Changes}: Update docstrings and comments
+    \item \textbf{Run Tests}: Verify functionality before pushing
+\end{itemize}
+
+\subsection{Ending Work Session}
+\begin{lstlisting}[language=bash]
+# Commit all changes
+git add -A
+git commit -m "Descriptive commit message"
+
+# Push to remote (Strategy 1 and 3)
+git push origin <branch-name>
+
+# Optional: Tag important milestones
+git tag -a v2.1.0 -m "Enhanced temporal analysis complete"
+git push origin v2.1.0
+\end{lstlisting}
+
+\section{Conflict Resolution}
+
+\subsection{When Conflicts Occur}
+\begin{lstlisting}[language=bash]
+# If merge conflict during pull
+git status                    # See conflicted files
+# Edit files to resolve conflicts (remove <<<, ===, >>> markers)
+git add <resolved-files>
+git commit -m "Resolve merge conflicts"
+
+# If you need to abort and start over
+git merge --abort
+git reset --hard HEAD
+\end{lstlisting}
+
+\subsection{Prevention Strategies}
+\begin{itemize}
+    \item Work on different modules when possible
+    \item Communicate about simultaneous work on same files
+    \item Use Strategy 2 or 3 for complex, overlapping changes
+    \item Keep main branch stable and tested
+\end{itemize}
+
+\section{Integration Workflow}
+
+\subsection{Merging Feature to Main}
+\begin{lstlisting}[language=bash]
+# Ensure feature is complete and tested
+git checkout feature/my-feature
+python fractal_analyzer/analysis/enhanced_analyzer.py --help  # Test
+python -c "import fractal_analyzer; print('Package works')"    # Test
+
+# Update main and merge
+git checkout main
+git pull origin main
+git merge feature/my-feature
+
+# Test integrated system
+pip install -e .  # Reinstall package
+python -c "import fractal_analyzer; print(f'v{fractal_analyzer.__version__}')"
+
+# Push and clean up
+git push origin main
+git branch -d feature/my-feature
+git push origin --delete feature/my-feature  # Delete remote branch
+\end{lstlisting}
+
+\section{Recommended Strategy by Use Case}
+
+\begin{center}
+\begin{tabular}{|l|c|c|c|}
+\hline
+\textbf{Scenario} & \textbf{Strategy 1} & \textbf{Strategy 2} & \textbf{Strategy 3} \\
+\hline
+Small bug fixes & \checkmark & & \\
+\hline
+Single-day features & \checkmark & & \\
+\hline
+Multi-day features & & & \checkmark \\
+\hline
+Independent research & & \checkmark & \\
+\hline
+Collaborative features & \checkmark & & \checkmark \\
+\hline
+Experimental changes & & \checkmark & \\
+\hline
+Paper deadlines & \checkmark & & \\
+\hline
+\end{tabular}
+\end{center}
+
+\section{Emergency Procedures}
+
+\subsection{If You Forget to Pull Before Working}
+\begin{lstlisting}[language=bash]
+# Stash your changes
+git stash
+
+# Pull latest changes
+git pull origin <branch-name>
+
+# Apply your stashed changes
+git stash pop
+
+# Resolve any conflicts, then commit
+\end{lstlisting}
+
+\subsection{If You Need to Sync Immediately}
+\begin{lstlisting}[language=bash]
+# Quick sync without full merge
+git fetch origin
+git log HEAD..origin/<branch-name> --oneline  # See what's new
+git pull origin <branch-name>
+\end{lstlisting}
+
+\section{Conclusion}
+
+The hybrid approach (Strategy 3) is recommended for most FractalAnalyzer development scenarios, as it provides both coordination benefits and development safety. Always prioritize keeping the main branch stable and tested, as it serves as the foundation for your Rayleigh-Taylor instability research.
+
+Remember: \textit{When in doubt, create a new branch!} Branches are cheap, but lost work is expensive.
+
+\end{document}
