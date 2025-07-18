@@ -1,15 +1,20 @@
-# fractal_analyzer/core/__init__.py
 """
-Core fractal analysis modules with CONREC precision interface extraction.
+Core analysis components for fractal and RT analysis.
+
+This module contains the fundamental building blocks used by higher-level
+analysis tools.
 """
 
+from .rt_analyzer import RTAnalyzer, InterfaceCache
 from .fractal_analyzer import FractalAnalyzer
-from .rt_analyzer import RTAnalyzer
-from .conrec_extractor import CONRECExtractor, compare_extraction_methods
+from .conrec_extractor import CONRECExtractor
+from .plic_extractor import PLICExtractor, AdvancedPLICExtractor
 
 __all__ = [
-    'FractalAnalyzer',
-    'RTAnalyzer', 
+    'RTAnalyzer',
+    'InterfaceCache',
+    'FractalAnalyzer', 
     'CONRECExtractor',
-    'compare_extraction_methods'
+    'PLICExtractor',
+    'AdvancedPLICExtractor'
 ]

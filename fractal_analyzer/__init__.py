@@ -1,23 +1,43 @@
 """
-Fractal Analyzer Package
+FractalAnalyzer: Rayleigh-Taylor instability analysis tools.
 
-A comprehensive toolkit for fractal dimension analysis of fluid interfaces
-and mathematical fractals, with specialized tools for Rayleigh-Taylor instability simulations.
+A comprehensive package for analyzing Rayleigh-Taylor instabilities with 
+fractal dimension analysis, temporal evolution studies, and validation 
+against experimental data.
+
+Two-Tier Analysis System:
+- Tier 1: General RT Analysis (analysis module)
+- Tier 2: Dalziel Validation (validation module)
 """
 
-__version__ = "2.1.0"
-__author__ = "Rod Douglass"
-__email__ = "rwdlanm@gmail.com"
+__version__ = "2.0.0"
+__author__ = "Your Name"
 
-# Import main classes for easy access
-from .core.fractal_analyzer import FractalAnalyzer
-from .core.rt_analyzer import RTAnalyzer
-from .core.conrec_extractor import CONRECExtractor, compare_extraction_methods
-from .optimized import *
+# Core components (main building blocks)
+try:
+    from .core.rt_analyzer import RTAnalyzer
+    from .core.fractal_analyzer import FractalAnalyzer
+except ImportError:
+    print("Warning: Could not import core analyzers")
+    RTAnalyzer = None
+    FractalAnalyzer = None
+
+# Main analysis functions
+try:
+    from .analysis.enhanced_analyzer import determine_analysis_mode, find_timestep_files_for_resolution
+except ImportError:
+    print("Warning: Could not import analysis functions")
+
+# Dalziel validation functions  
+try:
+    from .validation.dalziel_comparison import compare_with_dalziel_experiments
+except ImportError:
+    print("Warning: Could not import validation functions")
 
 __all__ = [
-    'FractalAnalyzer',
     'RTAnalyzer',
-	'CONRECExtractor',
-	'compare_extraction_methods',
+    'FractalAnalyzer',
+    'determine_analysis_mode',
+    'find_timestep_files_for_resolution',
+    'compare_with_dalziel_experiments'
 ]

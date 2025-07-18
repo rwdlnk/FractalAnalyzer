@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 Setup configuration for the Fractal Analyzer package.
-Updated for v2.0.0 reorganized package structure.
 """
 
 from setuptools import setup, find_packages
@@ -18,10 +17,10 @@ with open(os.path.join(here, "requirements.txt"), "r", encoding="utf-8") as fh:
 
 setup(
     name="fractal-analyzer",
-    version="2.0.0",  # UPDATED: Major reorganization version
+    version="2.1.0",  # UPDATED: Increment version for CONREC + parallel features
     author="Rod Douglass",
     author_email="rwdlanm@gmail.com",
-    description="Advanced fractal dimension analysis for Rayleigh-Taylor instabilities with two-tier analysis system",
+    description="Advanced fractal dimension analysis for fluid interfaces with CONREC precision extraction and parallel processing",  # UPDATED
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/rwdlnk/Fractal_Analyzer",
@@ -31,8 +30,8 @@ setup(
         "Source Code": "https://github.com/rwdlnk/Fractal_Analyzer",
     },
     
-    # UPDATED: Use find_packages() to automatically discover new structure
-    packages=find_packages(exclude=["tests", "tests.*", "docs", "docs.*", "papers", "papers.*"]),
+    # UPDATED: Include scripts directory packages
+    packages=find_packages(exclude=["tests", "tests.*", "docs", "docs.*"]) + ['scripts', 'scripts.optimized'],
     
     classifiers=[
         "Development Status :: 4 - Beta",
@@ -49,12 +48,12 @@ setup(
         "Topic :: Scientific/Engineering :: Mathematics",
         "Topic :: Scientific/Engineering :: Visualization",
         "Topic :: Software Development :: Libraries :: Python Modules",
-        "Environment :: Console",
+        "Environment :: Console",  # NEW: Added for command-line tools
     ],
     keywords=[
         "fractal", "dimension", "box-counting", "rayleigh-taylor", 
         "mixing", "cfd", "interface", "multifractal", "physics", "simulation",
-        "conrec", "plic", "dalziel", "validation", "temporal-evolution", "convergence"
+        "conrec", "contouring", "parallel-processing", "temporal-evolution"  # NEW: CONREC + parallel keywords
     ],
     python_requires=">=3.8",
     install_requires=requirements,
@@ -78,7 +77,7 @@ setup(
             "notebook>=6.0",
             "ipywidgets>=7.6",
         ],
-        "parallel": [
+        "parallel": [  # NEW: Parallel processing extras
             "psutil>=5.8.0",
         ],
         "all": [
@@ -88,30 +87,26 @@ setup(
             "sphinx>=4.0", "sphinx-rtd-theme>=1.0", "myst-parser>=0.15",
             # Jupyter
             "jupyter>=1.0", "notebook>=6.0", "ipywidgets>=7.6",
-            # Parallel processing
+            # Parallel processing  # NEW
             "psutil>=5.8.0",
         ],
     },
     entry_points={
         "console_scripts": [
-            # UPDATED: New two-tier system entry points
-            
-            # Tier 1: General RT Analysis
-            "rt-analysis=fractal_analyzer.analysis.enhanced_analyzer:main",
-            "rt-temporal=fractal_analyzer.analysis.enhanced_parallel_temporal_evolution_analyzer:main",
-            "rt-convergence=fractal_analyzer.analysis.hybred_parallel_resolution_convergence:main",
-            
-            # Tier 2: Dalziel Validation  
-            "dalziel-validation=fractal_analyzer.validation.dalziel_comparison:main",
-            "dalziel-power=fractal_analyzer.validation.dalziel_power_spectrum:main",
-            
-            # Core Components (for advanced users)
+            # Core analysis tools
             "fractal-analyze=fractal_analyzer.core.fractal_analyzer:main",
-            "rt-core=fractal_analyzer.core.rt_analyzer:main",
-            
-            # Legacy scripts (if they have main functions)
-            "rt-legacy-temporal=scripts.analyze_temporal_improved:main",
-            "rt-legacy-convergence=scripts.basic_resolution_convergence:main",
+            "rt-analyze=fractal_analyzer.core.rt_analyzer:main",  # UPDATED: Now supports CONREC
+
+            "rt-convergence=scripts.basic_resolution_convergence:main",  # Keep existing
+            "rt-temporal=scripts.analyze_temporal_improved:main",  # Your existing script
+        
+            # NEW: Add serial analysis scripts
+            "temporal-evolution=fractal_analyzer.optimized.temporal_evolution_analyzer:main",
+            "resolution-comparison=fractal_analyzer.optimized.resolution_comparison:main",
+        
+            # NEW: Add parallel analysis scripts (these were missing!)
+            "parallel-temporal=fractal_analyzer.optimized.parallel_temporal_evolution_analyzer:main",
+            "parallel-resolution=fractal_analyzer.optimized.parallel_resolution_comparison:main",
         ],
     },
     include_package_data=True,
@@ -121,10 +116,8 @@ setup(
             "examples/data/*.vtk", 
             "tests/test_data/*.txt",
             "tests/test_data/*.vtk",
-            "validation/data/*.json",
-            "validation/data/*.csv",
         ],
-        "scripts": [
+        "scripts": [  # NEW: Include scripts in package data
             "*.py",
             "optimized/*.py",
         ],
@@ -134,6 +127,7 @@ setup(
     # Additional metadata
     platforms=["any"],
     
-    # Package directory
+    # Long description content type is already set above
+    # Ensure we can find the package
     package_dir={"": "."},
 )
