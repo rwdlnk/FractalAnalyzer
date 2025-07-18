@@ -957,7 +957,7 @@ class RTAnalyzer:
 
         return perturbed
 
-    def analyze_vtk_file(self, vtk_file_path, analysis_types=None):
+    def analyze_vtk_file(self, vtk_file_path, analysis_types=None, h0=0.5, mixing_method='dalziel', min_box_size=None):
         """
         OPTIMIZED: Single-pass analysis with comprehensive interface extraction.
         Eliminates redundant CONREC calls by extracting all needed interface data once.
@@ -1020,6 +1020,15 @@ class RTAnalyzer:
             wavelength_stats = self._compute_wavelength_spectrum(base_interface)
             results['wavelength_analysis'] = wavelength_stats
             results['wavelength_computation_time'] = time.time() - wavelength_start
+
+        if 'mixing' in analysis_types:
+            print("  🧪 Computing mixing analysis...")
+            mixing_start = time.time()
+            # Get raw VTK data for mixing analysis
+            vtk_data = self._load_vtk_data(vtk_file_path)
+            mixing_result = self.compute_mixing_thickness(vtk_data, h0, method=mixing_method)
+            results.update(mixing_result)
+            results['mixing_computation_time'] = time.time() - mixing_start
 
         if 'perturbation' in analysis_types and interface_data['perturbed_interfaces']:
             print("  🔀 Computing perturbation analysis...")

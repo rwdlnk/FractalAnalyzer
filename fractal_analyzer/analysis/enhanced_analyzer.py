@@ -368,7 +368,7 @@ def create_base_result_dict(resolution_str, target_time, extraction_method, work
     }
 
 def create_success_result(base_result, vtk_analysis_result, vtk_file, actual_time, 
-                         processing_time, segments_count):
+                         processing_time, segments_count, h0):
     """Create successful analysis result dictionary."""
     result = base_result.copy()
 
@@ -379,12 +379,13 @@ def create_success_result(base_result, vtk_analysis_result, vtk_file, actual_tim
         'actual_time': actual_time,
         'time_error': abs(actual_time - base_result['target_time']),
         # FIXED: Map rt_analyzer field names to expected field names
-        'fractal_dim': vtk_analysis_result.get('fractal_dim', vtk_analysis_result.get('dimension', np.nan)),
+        'fractal_dim': vtk_analysis_result.get('fractal_dimension', vtk_analysis_result.get('fractal_dim', np.nan)),
         'fd_error': vtk_analysis_result.get('fd_error', vtk_analysis_result.get('error', np.nan)),
         'fd_r_squared': vtk_analysis_result.get('fd_r_squared', vtk_analysis_result.get('r_squared', np.nan)),
         'h_total': vtk_analysis_result.get('h_total', np.nan),
         'ht': vtk_analysis_result.get('ht', np.nan),
         'hb': vtk_analysis_result.get('hb', np.nan),
+        'h0': h0,
         'segments': segments_count,
         'processing_time': processing_time,
         'vtk_file': os.path.basename(vtk_file),
@@ -416,7 +417,7 @@ def create_success_result(base_result, vtk_analysis_result, vtk_file, actual_tim
 
     return result
 
-def create_failure_result(base_result, error_message, vtk_file=None, actual_time=None, processing_time=None):
+def create_failure_result(base_result, error_message, vtk_file=None, actual_time=None, processing_time=None, h0=0.5):
     """Create failed analysis result dictionary."""
     result = base_result.copy()
     result.update({
@@ -428,6 +429,7 @@ def create_failure_result(base_result, error_message, vtk_file=None, actual_time
         'h_total': np.nan,
         'ht': np.nan,
         'hb': np.nan,
+        'h0': h0,
         'segments': np.nan,
         'processing_time': processing_time if processing_time is not None else np.nan,
         'vtk_file': os.path.basename(vtk_file) if vtk_file else 'not_found',
@@ -455,10 +457,12 @@ def analyze_single_file(vtk_file, analyzer, analysis_params):
 
     try:
         # Perform VTK analysis
+        print(f"🎯 Using initial interface height h0 = {analysis_params.get('h0', 0.5)}")
         result = analyzer.analyze_vtk_file(
             vtk_file,
-            mixing_method=analysis_params.get('mixing_method', 'dalziel'),
+            analysis_types=['fractal_dim', 'mixing'],
             h0=analysis_params.get('h0', 0.5),
+            mixing_method=analysis_params.get('mixing_method', 'dalziel'),
             min_box_size=analysis_params.get('min_box_size', None)
         )
         
@@ -543,7 +547,7 @@ def analyze_temporal_evolution_batch(args):
 
         if target_time not in file_time_map:
             print(f"   No file found for t={target_time}")
-            failure_result = create_failure_result(base_result, "No file found for target time")
+            failure_result = create_failure_result(base_result, "No file found for target time", h0=analysis_params.get('h0', 0.5))
             batch_results.append(failure_result)
             continue
 
@@ -553,7 +557,7 @@ def analyze_temporal_evolution_batch(args):
             vtk_result, segments_count, processing_time = analyze_single_file(vtk_file, analyzer, analysis_params)
 
             success_result = create_success_result(
-                base_result, vtk_result, vtk_file, actual_time, processing_time, segments_count
+                base_result, vtk_result, vtk_file, actual_time, processing_time, segments_count, analysis_params.get('h0', 0.5)
             )
 
             print(f"   ✅ t={target_time:.1f}: D={success_result['fractal_dim']:.4f}±{success_result['fd_error']:.4f}, "
@@ -563,7 +567,7 @@ def analyze_temporal_evolution_batch(args):
 
         except Exception as e:
             print(f"   ❌ t={target_time}: {str(e)}")
-            failure_result = create_failure_result(base_result, str(e), vtk_file, actual_time)
+            failure_result = create_failure_result(base_result, str(e, h0=analysis_params.get('h0', 0.5)), vtk_file, actual_time)
             batch_results.append(failure_result)
 
     worker_time = time.time() - worker_start
@@ -612,7 +616,7 @@ def analyze_convergence_single_resolution(args):
 
         if target_time not in file_time_map:
             print(f"   No file found for t={target_time}")
-            return create_failure_result(base_result, "No file found for target time")
+            return create_failure_result(base_result, "No file found for target time", h0=analysis_params.get('h0', 0.5))
 
         vtk_file, actual_time = file_time_map[target_time]
 
@@ -620,7 +624,7 @@ def analyze_convergence_single_resolution(args):
         vtk_result, segments_count, processing_time = analyze_single_file(vtk_file, analyzer, analysis_params)
 
         success_result = create_success_result(
-            base_result, vtk_result, vtk_file, actual_time, processing_time, segments_count
+            base_result, vtk_result, vtk_file, actual_time, processing_time, segments_count, analysis_params.get('h0', 0.5)
         )
 
         print(f"✅ Worker {os.getpid()}: {grid_resolution_str} D={success_result['fractal_dim']:.4f}±{success_result['fd_error']:.4f}, "
@@ -630,7 +634,7 @@ def analyze_convergence_single_resolution(args):
 
     except Exception as e:
         print(f"❌ Worker {os.getpid()}: {grid_resolution_str} failed - {str(e)}")
-        return create_failure_result(base_result, str(e))
+        return create_failure_result(base_result, str(e, h0=analysis_params.get('h0', 0.5)))
 
 def analyze_matrix_single_point(args):
     """
@@ -667,7 +671,7 @@ def analyze_matrix_single_point(args):
         file_time_map = find_timestep_files_for_resolution(data_dir, resolution_str, [target_time])
 
         if target_time not in file_time_map:
-            return create_failure_result(base_result, "No file found for target time")
+            return create_failure_result(base_result, "No file found for target time", h0=analysis_params.get('h0', 0.5))
 
         vtk_file, actual_time = file_time_map[target_time]
 
@@ -675,13 +679,13 @@ def analyze_matrix_single_point(args):
         vtk_result, segments_count, processing_time = analyze_single_file(vtk_file, analyzer, analysis_params)
 
         success_result = create_success_result(
-            base_result, vtk_result, vtk_file, actual_time, processing_time, segments_count
+            base_result, vtk_result, vtk_file, actual_time, processing_time, segments_count, analysis_params.get('h0', 0.5)
         )
 
         return success_result
 
     except Exception as e:
-        return create_failure_result(base_result, str(e))
+        return create_failure_result(base_result, str(e, h0=analysis_params.get('h0', 0.5)))
 
 def run_multi_time_convergence_analysis(data_dirs, resolutions, target_times, output_dir,
                                        analysis_params, num_processes):
@@ -1025,6 +1029,7 @@ def print_temporal_evolution_summary(df):
             print(f"    Time range: {res_data['actual_time'].min():.3f} to {res_data['actual_time'].max():.3f}")
             print(f"    D range: {res_data['fractal_dim'].min():.4f} to {res_data['fractal_dim'].max():.4f}")
             print(f"    Final mixing thickness: {res_data['h_total'].iloc[-1]:.4f}")
+            print(f"    Initial interface height h0: {res_data['h0'].iloc[0]}")
             print(f"    Segment range: {int(res_data['segments'].min())} to {int(res_data['segments'].max())}")
 
 def print_convergence_summary(df):
