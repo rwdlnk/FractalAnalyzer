@@ -184,23 +184,20 @@ def determine_analysis_mode(resolutions, target_times):
     num_times = len(target_times)
     
     print(f"🔍 Enhanced mode detection: {num_resolutions} resolutions × {num_times} times")
-    
+
     if num_resolutions == 1 and num_times > 1:
-        print(f"   → Detected: Temporal Evolution (single resolution, multiple times)")
-        return 'temporal_evolution'
+        print(f"   → Detected: Matrix Analysis (single resolution, multiple times - optimized for parallel)")
+        return 'matrix_analysis'
     elif num_resolutions > 1 and num_times == 1:
         print(f"   → Detected: Convergence Study (multiple resolutions, single time)")
         return 'convergence_study'
     elif num_resolutions > 1 and num_times > 1:
-        # FIXED: This is the key change - convergence at multiple times!
         print(f"   → Detected: Multi-Time Convergence (convergence study at each time)")
         print(f"   → Will create {num_times} individual convergence plots + evolution summary")
         return 'multi_time_convergence'
     else:
-        # Single resolution, single time - treat as temporal evolution
         print(f"   → Detected: Temporal Evolution (single point analysis)")
         return 'temporal_evolution'
-
 def get_method_info(analysis_params):
     """Get extraction method information for naming and display."""
     if analysis_params.get('use_plic', False):
@@ -380,9 +377,8 @@ def create_success_result(base_result, vtk_analysis_result, vtk_file, actual_tim
         'time_error': abs(actual_time - base_result['target_time']),
         # FIXED: Map rt_analyzer field names to expected field names
         'fractal_dim': vtk_analysis_result.get('fractal_dimension', vtk_analysis_result.get('fractal_dim', np.nan)),
-        'fd_error': vtk_analysis_result.get('fd_error', vtk_analysis_result.get('error', np.nan)),
-        'fd_r_squared': vtk_analysis_result.get('fd_r_squared', vtk_analysis_result.get('r_squared', np.nan)),
-        'h_total': vtk_analysis_result.get('h_total', np.nan),
+        'fd_error': vtk_analysis_result.get('fractal_error', vtk_analysis_result.get('fd_error', np.nan)),
+        'fd_r_squared': vtk_analysis_result.get('fractal_r_squared', vtk_analysis_result.get('fd_r_squared', np.nan)),
         'ht': vtk_analysis_result.get('ht', np.nan),
         'hb': vtk_analysis_result.get('hb', np.nan),
         'h0': h0,
@@ -838,17 +834,8 @@ def run_matrix_analysis(data_dirs, resolutions, target_times, output_dir,
 
     try:
         with Pool(processes=num_processes) as pool:
-            # Process in chunks to show progress
-            chunk_size = max(1, len(process_args) // 10)  # 10% chunks
-            results = []
-
-            for i in range(0, len(process_args), chunk_size):
-                chunk = process_args[i:i+chunk_size]
-                chunk_results = pool.map(analyze_matrix_single_point, chunk)
-                results.extend(chunk_results)
-
-                progress = min(100, (i + len(chunk)) * 100 // len(process_args))
-                print(f"   Progress: {progress}% ({i + len(chunk)}/{len(process_args)} points)")
+            # Process all tasks in parallel
+            results = pool.map(analyze_matrix_single_point, process_args)
 
     except KeyboardInterrupt:
         print("\n⚠️  Analysis interrupted by user")
@@ -1362,14 +1349,14 @@ def create_convergence_evolution_summary(df, output_dir, method_suffix):
     
     # Plot 3: Resolution scaling at different times
     time_colors = plt.cm.plasma(np.linspace(0, 1, min(len(times), 5)))
-    time_subset = times[::max(1, len(times)//5)]  # Show up to 5 times
+    time_subset = times[::max(1, len(times)//min(len(times), 5))]  # Match color array sizemax(1, len(times)//5)]  # Show up to 5 times
     
     for i, target_time in enumerate(time_subset):
         time_data = df[abs(df['actual_time'] - target_time) < 0.5].sort_values('effective_resolution')
         if len(time_data) > 0:
             ax3.errorbar(time_data['effective_resolution'], time_data['fractal_dim'], 
                        yerr=time_data['fd_error'], fmt='s-', capsize=3,
-                       color=time_colors[i], linewidth=2, markersize=6,
+                       color=time_colors[i % len(time_colors)], linewidth=2, markersize=6,
                        label=f't ≈ {target_time:.1f}')
     
     ax3.set_xscale('log', base=2)
@@ -1756,7 +1743,7 @@ def create_matrix_plots(df, output_dir, method_suffix):
     # Plot 3: Resolution convergence at different times
     if len(times) > 1:
         time_colors = plt.cm.plasma(np.linspace(0, 1, min(len(times), 5)))  # Limit colors
-        time_subset = times[::max(1, len(times)//5)]  # Show up to 5 times
+        time_subset = times[::max(1, len(times)//min(len(times), 5))]  # Match color array sizemax(1, len(times)//5)]  # Show up to 5 times
 
         for i, target_time in enumerate(time_subset):
             time_data = []
@@ -1775,7 +1762,7 @@ def create_matrix_plots(df, output_dir, method_suffix):
                 time_df = pd.DataFrame(time_data)
                 ax3.errorbar(time_df['effective_resolution'], time_df['fractal_dim'],
                            yerr=time_df['fd_error'], fmt='s-', capsize=3,
-                           color=time_colors[i], linewidth=2, markersize=6,
+                           color=time_colors[i % len(time_colors)], linewidth=2, markersize=6,
                            label=f't ≈ {target_time:.1f}')
 
         ax3.set_xscale('log', base=2)

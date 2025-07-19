@@ -822,7 +822,7 @@ class RTAnalyzer:
         """Compute box counting fractal dimension from interface points."""
         try:
             if not interface_points:
-                return np.nan
+                return np.nan, np.nan, np.nan
 
             # Convert to segments format for fractal analyzer
             segments = []
@@ -832,7 +832,7 @@ class RTAnalyzer:
                 segments.append((p1, p2))
 
             if not segments:
-                return np.nan
+                return np.nan, np.nan, np.nan
 
             # Use fractal analyzer if available
             if self.fractal_analyzer is not None:
@@ -849,14 +849,16 @@ class RTAnalyzer:
                 )
 
                 windows, dims, errs, r2s, optimal_window, optimal_dimension, box_sizes, box_counts, bounding_box = results
-                return optimal_dimension
+                # Return dimension, error, and r_squared
+                optimal_idx = windows.index(optimal_window)
+                optimal_error = errs[optimal_idx]
+                optimal_r2 = r2s[optimal_idx]
+                return optimal_dimension, optimal_error, optimal_r2
             else:
                 print("Warning: Fractal analyzer not available")
-                return np.nan
-
+                return np.nan, np.nan, np.nan
         except Exception as e:
-            print(f"Error computing fractal dimension: {str(e)}")
-            return np.nan
+            return np.nan, np.nan, np.nan
 
     def _extract_interface_comprehensive(self, vtk_file_path):
         """
@@ -1001,8 +1003,10 @@ class RTAnalyzer:
             fractal_start = time.time()
 
             # Use smoothed interface for more stable fractal calculation
-            fractal_dim = self._compute_box_counting_dimension(smoothed_interface)
+            fractal_dim, fractal_error, fractal_r2 = self._compute_box_counting_dimension(smoothed_interface)
             results['fractal_dimension'] = fractal_dim
+            results['fractal_error'] = fractal_error
+            results['fractal_r_squared'] = fractal_r2
             results['fractal_computation_time'] = time.time() - fractal_start
 
         if 'curvature' in analysis_types:
@@ -1036,10 +1040,12 @@ class RTAnalyzer:
 
             perturbation_results = []
             for i, perturbed_interface in enumerate(interface_data['perturbed_interfaces']):
-                perturb_fractal = self._compute_box_counting_dimension(perturbed_interface)
+                perturb_fractal, perturb_error, perturb_r2 = self._compute_box_counting_dimension(perturbed_interface)
                 perturbation_results.append({
                     'perturbation_level': i,
-                    'fractal_dimension': perturb_fractal
+                    'fractal_dimension': perturb_fractal,
+                    'fractal_error': perturb_error,
+                    'fractal_r_squared': perturb_r2
                 })
 
             results['perturbation_analysis'] = perturbation_results
