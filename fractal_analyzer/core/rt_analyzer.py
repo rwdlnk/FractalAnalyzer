@@ -672,7 +672,7 @@ class RTAnalyzer:
 
         # PHYSICS-BASED AUTO-ESTIMATION
         if min_box_size is None:
-            min_box_size = self.fractal_analyzer.estimate_min_box_size_from_segments(segments)
+            min_box_size = self.fractal_analyzer.estimate_min_box_size(segments)
             print(f"Auto-estimated min_box_size: {min_box_size:.8f}")
         else:
             print(f"Using provided min_box_size: {min_box_size:.8f}")
@@ -1067,7 +1067,7 @@ class RTAnalyzer:
         print(f"   Points processed: {interface_data['metadata']['point_count']}")
 
         # Multifractal analysis if requested
-        if enable_multifractal and 'segments' in locals():
+        if enable_multifractal and interface_data and interface_data.get("base_interface"):
             print(f"\n🔬 MULTIFRACTAL ANALYSIS")
             print(f"=" * 50)
             
@@ -1075,31 +1075,45 @@ class RTAnalyzer:
             
             # Set output directory for multifractal results
             if mf_output_dir is None:
-                mf_output_dir = os.path.join(file_dir, 'multifractal')
+                mf_output_dir = os.path.join(self.output_dir, "multifractal")
             os.makedirs(mf_output_dir, exist_ok=True)
             
+            # Convert interface data to segments for multifractal analysis
+            segments = []
+            base_interface = interface_data["base_interface"]
+            for i in range(len(base_interface) - 1):
+                p1 = base_interface[i]
+                p2 = base_interface[i + 1]
+                segments.append((p1, p2))
+            
             # Extract time value for labeling
-            time_value = data.get('time', None)
+            time_value = results.get("file_path", "").split("_")[-1].replace(".vtk", "") if "file_path" in results else None
+            if time_value:
+                try:
+                    time_value = float(time_value) / 1000.0
+                except:
+                    time_value = None
             
             try:
                 mf_results = self.multifractal_analyzer.compute_multifractal_spectrum(
-                    segments, 
+                    segments,
                     min_box_size=min_box_size,
-                    q_values=q_values, 
+                    q_values=q_values,
                     output_dir=mf_output_dir,
                     time_value=time_value
                 )
                 
                 if mf_results:
-                    result['multifractal'] = mf_results
+                    results["multifractal"] = mf_results
                     self.multifractal_analyzer.print_multifractal_summary(mf_results)
                     print(f"Multifractal results saved to: {mf_output_dir}")
                 else:
                     print("⚠️ Multifractal analysis failed")
-                    result['multifractal'] = None
+                    results["multifractal"] = None
                     
             except Exception as e:
                 print(f"❌ Multifractal analysis error: {str(e)}")
+                results["multifractal"] = None
                 result['multifractal'] = None
 
         return results
@@ -1843,12 +1857,15 @@ Examples:
                 subdir = os.path.join(args.output_dir, "single_file_analysis")
                 os.makedirs(subdir, exist_ok=True)
 
-                result = analyzer.analyze_vtk_file_legacy(
+                result = analyzer.analyze_vtk_file(
                     args.file,
-                    subdir,
-                    mixing_method=args.mixing_method,
+                    analysis_types=['fractal_dim', 'mixing'],
                     h0=args.h0,
-                    min_box_size=args.min_box_size
+                    mixing_method=args.mixing_method,
+                    min_box_size=args.min_box_size,
+                    enable_multifractal=args.multifractal,
+                    q_values=getattr(args, 'q_values', None),
+                    mf_output_dir=getattr(args, 'mf_output_dir', None)
                 )
 
                 print(f"\nResults for {args.file}:")
