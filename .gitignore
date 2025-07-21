@@ -233,3 +233,4 @@ results/
 
 # Profiling output
 *.prof
+backups/
