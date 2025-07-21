@@ -155,6 +155,13 @@ class RTAnalyzer:
             print("WARNING: Both CONREC and PLIC enabled. PLIC will take precedence.")
             self.use_conrec = False
             print("CONREC disabled. Using PLIC for interface extraction.")
+    
+    def enable_multifractal_analysis(self):
+        """Lazy loading of multifractal capabilities."""
+        if not hasattr(self, 'multifractal_analyzer'):
+            from ..analysis.multifractal_analyzer import MultifractalAnalyzer
+            self.multifractal_analyzer = MultifractalAnalyzer(debug=self.debug)
+            print("Multifractal analyzer enabled")
 
     def auto_detect_resolution_from_vtk_filename(self, vtk_file):
         """Enhanced resolution detection for both square and rectangular grids."""
@@ -959,7 +966,8 @@ class RTAnalyzer:
 
         return perturbed
 
-    def analyze_vtk_file(self, vtk_file_path, analysis_types=None, h0=0.5, mixing_method='dalziel', min_box_size=None):
+    def analyze_vtk_file(self, vtk_file_path, analysis_types=None, h0=0.5, mixing_method='dalziel',
+         min_box_size=None, enable_multifractal=False, q_values=None, mf_output_dir=None):
         """
         OPTIMIZED: Single-pass analysis with comprehensive interface extraction.
         Eliminates redundant CONREC calls by extracting all needed interface data once.
@@ -1057,6 +1065,42 @@ class RTAnalyzer:
         print(f"✅ OPTIMIZED Analysis complete: {total_time:.2f}s")
         print(f"   Interface extraction: {interface_data['metadata']['extraction_time']:.2f}s")
         print(f"   Points processed: {interface_data['metadata']['point_count']}")
+
+        # Multifractal analysis if requested
+        if enable_multifractal and 'segments' in locals():
+            print(f"\n🔬 MULTIFRACTAL ANALYSIS")
+            print(f"=" * 50)
+            
+            self.enable_multifractal_analysis()
+            
+            # Set output directory for multifractal results
+            if mf_output_dir is None:
+                mf_output_dir = os.path.join(file_dir, 'multifractal')
+            os.makedirs(mf_output_dir, exist_ok=True)
+            
+            # Extract time value for labeling
+            time_value = data.get('time', None)
+            
+            try:
+                mf_results = self.multifractal_analyzer.compute_multifractal_spectrum(
+                    segments, 
+                    min_box_size=min_box_size,
+                    q_values=q_values, 
+                    output_dir=mf_output_dir,
+                    time_value=time_value
+                )
+                
+                if mf_results:
+                    result['multifractal'] = mf_results
+                    self.multifractal_analyzer.print_multifractal_summary(mf_results)
+                    print(f"Multifractal results saved to: {mf_output_dir}")
+                else:
+                    print("⚠️ Multifractal analysis failed")
+                    result['multifractal'] = None
+                    
+            except Exception as e:
+                print(f"❌ Multifractal analysis error: {str(e)}")
+                result['multifractal'] = None
 
         return results
 
@@ -1704,6 +1748,12 @@ Examples:
 
   # Test the new optimization
   python rt_analyzer.py --file RT_0009000.vtk --test-optimization
+
+  # Multifractal analysis
+  python rt_analyzer.py --file RT_0009000.vtk --multifractal
+
+  # Custom multifractal analysis with specific q-values
+  python rt_analyzer.py --file RT_0009000.vtk --multifractal --q-values -3 -2 -1 0 1 2 3
 """)
 
     parser.add_argument('--file', help='Single VTK file to analyze')
@@ -1727,7 +1777,12 @@ Examples:
                    help='Test the new optimization methods')
     parser.add_argument('--debug', action='store_true',
                    help='Enable debug output')
-
+    parser.add_argument('--multifractal', action='store_true',
+                       help='Enable multifractal analysis')
+    parser.add_argument('--q-values', nargs='+', type=float, default=None,
+                       help='Q values for multifractal analysis (default: -5 to 5 in 0.5 steps)')
+    parser.add_argument('--mf-output-dir', default=None,
+                       help='Output directory for multifractal results (default: same as --output_dir)')
     args = parser.parse_args()
 
     # Validate arguments
@@ -1767,7 +1822,12 @@ Examples:
             if args.test_optimization:
                 # Test the new optimization
                 print("🚀 Testing optimization methods...")
-                result = analyzer.analyze_vtk_file(args.file, ['fractal_dim', 'curvature', 'wavelength'])
+                result = analyzer.analyze_vtk_file(args.file, 
+                    analysis_types=['fractal_dim', 'curvature', 'wavelength'],
+                    enable_multifractal=args.multifractal,
+                    q_values=getattr(args, 'q_values', None),
+                    mf_output_dir=getattr(args, 'mf_output_dir', None)
+                )
                 if result:
                     print(f"✅ Optimization test successful!")
                     print(f"  File: {result['file_path']}")
