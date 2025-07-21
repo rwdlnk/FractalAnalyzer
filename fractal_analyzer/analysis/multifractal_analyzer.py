@@ -507,3 +507,161 @@ class MultifractalAnalyzer:
             print(f"  🌀 Moderately complex interface")
         else:
             print(f"  📐 Relatively smooth interface")
+
+    def analyze_multifractal_evolution(self, segments_data: Dict, output_dir: Optional[str] = None, 
+                                     q_values: Optional[List[float]] = None) -> List[Dict]:
+        """
+        Analyze how multifractal properties evolve over time or across resolutions.
+        
+        Args:
+            segments_data: Dict mapping times/resolutions to segments data
+                         e.g. {0.1: segments_list, 0.2: segments_list} for time series
+                         or {100: segments_list, 200: segments_list} for resolutions
+            output_dir: Directory to save results
+            q_values: List of q moments to analyze (default: -5 to 5 in 0.5 steps)
+            
+        Returns:
+            List[Dict]: Multifractal evolution results
+        """
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+        
+        # Set default q values if not provided
+        if q_values is None:
+            q_values = np.arange(-5, 5.1, 0.5)
+        
+        # Determine type of analysis (time or resolution)
+        keys = list(segments_data.keys())
+        is_time_series = all(isinstance(k, (int, float)) for k in keys)
+        
+        if is_time_series:
+            print(f"Analyzing multifractal evolution over time/resolution series: {sorted(keys)}")
+            x_label = 'Time/Resolution'
+            series_name = "parameter"
+        else:
+            print(f"Analyzing multifractal evolution across parameters: {sorted(keys)}")
+            x_label = 'Parameter'
+            series_name = "parameter"
+        
+        # Initialize results storage
+        results = []
+        
+        # Process each segments dataset
+        for key, segments in sorted(segments_data.items()):
+            print(f"\nProcessing {series_name} = {key}")
+            
+            try:
+                # Create subdirectory for this point
+                if output_dir:
+                    point_dir = os.path.join(output_dir, f"{series_name}_{key}")
+                    os.makedirs(point_dir, exist_ok=True)
+                else:
+                    point_dir = None
+                
+                # Perform multifractal analysis
+                mf_results = self.compute_multifractal_spectrum(
+                    segments, q_values=q_values, output_dir=point_dir, time_value=key
+                )
+                
+                if mf_results:
+                    # Store results with the key (time or resolution)
+                    mf_results[series_name] = key
+                    results.append(mf_results)
+                
+            except Exception as e:
+                print(f"Error processing {series_name}={key}: {str(e)}")
+                import traceback
+                traceback.print_exc()
+        
+        # Create summary plots
+        if results and output_dir:
+            self._create_evolution_plots(results, series_name, x_label, output_dir, q_values)
+            self._save_evolution_summary(results, series_name, output_dir)
+        
+        return results
+    
+    def _create_evolution_plots(self, results: List[Dict], series_name: str, 
+                              x_label: str, output_dir: str, q_values: np.ndarray):
+        """Create evolution analysis plots."""
+        # Extract evolution of key parameters
+        x_values = [res[series_name] for res in results]
+        D0_values = [res['D0'] for res in results]
+        D1_values = [res['D1'] for res in results]
+        D2_values = [res['D2'] for res in results]
+        alpha_width = [res['alpha_width'] for res in results]
+        degree_mf = [res['degree_multifractality'] for res in results]
+        
+        # Plot generalized dimensions evolution
+        plt.figure(figsize=(10, 6))
+        plt.plot(x_values, D0_values, 'bo-', label='D(0) - Capacity dimension')
+        plt.plot(x_values, D1_values, 'ro-', label='D(1) - Information dimension')
+        plt.plot(x_values, D2_values, 'go-', label='D(2) - Correlation dimension')
+        plt.xlabel(x_label)
+        plt.ylabel('Generalized Dimensions')
+        plt.title(f'Evolution of Generalized Dimensions with {x_label}')
+        plt.grid(True)
+        plt.legend()
+        plt.savefig(os.path.join(output_dir, "dimensions_evolution.png"), dpi=300)
+        plt.close()
+        
+        # Plot multifractal parameters evolution
+        plt.figure(figsize=(10, 6))
+        plt.plot(x_values, alpha_width, 'ms-', label='α width')
+        plt.plot(x_values, degree_mf, 'cd-', label='Degree of multifractality')
+        plt.xlabel(x_label)
+        plt.ylabel('Parameter Value')
+        plt.title(f'Evolution of Multifractal Parameters with {x_label}')
+        plt.grid(True)
+        plt.legend()
+        plt.savefig(os.path.join(output_dir, "multifractal_params_evolution.png"), dpi=300)
+        plt.close()
+        
+        # Create 3D surface plot of D(q) evolution if possible
+        try:
+            from mpl_toolkits.mplot3d import Axes3D
+            
+            # Prepare data for 3D plot
+            X, Y = np.meshgrid(x_values, q_values)
+            Z = np.zeros((len(q_values), len(x_values)))
+            
+            for i, result in enumerate(results):
+                for j, q in enumerate(q_values):
+                    q_idx = np.where(result['q_values'] == q)[0]
+                    if len(q_idx) > 0:
+                        Z[j, i] = result['Dq'][q_idx[0]]
+            
+            # Create 3D plot
+            fig = plt.figure(figsize=(12, 8))
+            ax = fig.add_subplot(111, projection='3d')
+            surf = ax.plot_surface(X, Y, Z, cmap='viridis', edgecolor='none', alpha=0.8)
+            
+            ax.set_xlabel(x_label)
+            ax.set_ylabel('q')
+            ax.set_zlabel('D(q)')
+            ax.set_title(f'Evolution of D(q) Spectrum with {x_label}')
+            
+            fig.colorbar(surf, ax=ax, shrink=0.5, aspect=5, label='D(q)')
+            plt.savefig(os.path.join(output_dir, "Dq_evolution_3D.png"), dpi=300)
+            plt.close()
+            
+        except Exception as e:
+            print(f"Error creating 3D plot: {str(e)}")
+    
+    def _save_evolution_summary(self, results: List[Dict], series_name: str, output_dir: str):
+        """Save evolution analysis summary."""
+        x_values = [res[series_name] for res in results]
+        D0_values = [res['D0'] for res in results]
+        D1_values = [res['D1'] for res in results]
+        D2_values = [res['D2'] for res in results]
+        alpha_width = [res['alpha_width'] for res in results]
+        degree_mf = [res['degree_multifractality'] for res in results]
+        
+        summary_df = pd.DataFrame({
+            series_name: x_values,
+            'D0': D0_values,
+            'D1': D1_values,
+            'D2': D2_values,
+            'alpha_width': alpha_width,
+            'degree_multifractality': degree_mf
+        })
+        summary_df.to_csv(os.path.join(output_dir, "multifractal_evolution_summary.csv"), index=False)
