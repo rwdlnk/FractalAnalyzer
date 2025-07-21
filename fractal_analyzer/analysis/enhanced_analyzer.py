@@ -369,6 +369,13 @@ def create_success_result(base_result, vtk_analysis_result, vtk_file, actual_tim
     """Create successful analysis result dictionary."""
     result = base_result.copy()
 
+    # Extract ht and hb first  
+    ht = vtk_analysis_result.get('ht', np.nan)
+    hb = vtk_analysis_result.get('hb', np.nan)
+
+    # CALCULATE h_total = ht + hb (total mixing region height)
+    h_total = ht + hb if not (np.isnan(ht) or np.isnan(hb)) else np.nan
+
     # DEBUG: Print available fields
     print(f"DEBUG: Available RT analyzer fields: {list(vtk_analysis_result.keys())}")
 
@@ -381,6 +388,7 @@ def create_success_result(base_result, vtk_analysis_result, vtk_file, actual_tim
         'fd_r_squared': vtk_analysis_result.get('fractal_r_squared', vtk_analysis_result.get('fd_r_squared', np.nan)),
         'ht': vtk_analysis_result.get('ht', np.nan),
         'hb': vtk_analysis_result.get('hb', np.nan),
+        'h_total': h_total,
         'h0': h0,
         'segments': segments_count,
         'processing_time': processing_time,
